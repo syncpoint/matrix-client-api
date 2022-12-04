@@ -12,5 +12,8 @@
     "api"
   ],
   "author": "thomas.halwax@syncpoint.io",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "got": "^12.5.3"
+  }
 }
