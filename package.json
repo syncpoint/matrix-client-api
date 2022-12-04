@@ -1,5 +1,5 @@
 {
-  "name": "matrix-client-api",
+  "name": "@syncpoint/matrix-client-api",
   "version": "1.0.0",
   "description": "A minimal client API for [matrix]",
   "main": "index.js",
