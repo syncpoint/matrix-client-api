@@ -2,7 +2,8 @@ import { got } from 'got'
 import { randomUUID } from 'crypto'
 
 const POLL_TIMEOUT = 30000
-const RETRY_LIMIT = 73 // aha, a magic number without meaning :-)
+const REQUEST_TIMEOUT = 5000
+const RETRY_LIMIT = 3 // so max. time before an error is thrown is REQUEST_TIMEOUT * RETRY_LIMIT
 
 
 export default function ClientAPI (credentials) {
@@ -31,6 +32,9 @@ export default function ClientAPI (credentials) {
           }
         }
       ]
+    },
+    timeout: {
+      request: REQUEST_TIMEOUT
     }
   }
   
@@ -82,7 +86,10 @@ ClientAPI.login = async function (homeServerUrl, options) {
 
   const loginResult = await got.post('v3/login', {
     prefixUrl: new URL('/_matrix/client', homeServerUrl),
-    json: body
+    json: body,
+    timeout: {
+      request: REQUEST_TIMEOUT
+    }
   }).json()
 
   loginResult.home_server_url = homeServerUrl

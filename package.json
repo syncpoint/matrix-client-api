@@ -1,6 +1,6 @@
 {
   "name": "@syncpoint/matrix-client-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A minimal client API for [matrix]",
   "main": "src/client-api.mjs",
   "scripts": {
