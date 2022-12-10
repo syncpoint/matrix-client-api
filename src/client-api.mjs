@@ -52,7 +52,7 @@ export default function ClientAPI (credentials) {
 
 
 ClientAPI.prototype.refreshAccessToken = async function (refreshToken) {
-  const tokens = await this.client.post('v1/refresh', {
+  const tokens = await this.client.post('v3/refresh', {
     json: {
       refresh_token: refreshToken
     }
