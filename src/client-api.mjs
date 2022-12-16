@@ -149,6 +149,19 @@ ClientAPI.prototype.join = async function (roomId) {
   return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/join`).json()
 }
 
+ClientAPI.prototype.leave = async function (roomId) {
+  return this.client.post(`v3/rooms/${roomId}/leave`).json()
+}
+
+ClientAPI.prototype.forget = async function (roomId) {
+  return this.client.post(`v3/rooms/${roomId}/forget`).json()
+}
+
+ClientAPI.prototype.joinedRooms = async function () {
+  return this.client.get('v3/joined_rooms').json()
+}
+
+
 ClientAPI.prototype.sendStateEvent = async function (roomId, eventType, content, stateKey) {
   return this.client.put(`v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}${stateKey ? '/' + encodeURIComponent(stateKey) : '' }`, {
     json: content
@@ -185,9 +198,15 @@ ClientAPI.prototype.sendToDevice = async function (deviceId, eventType, content 
 }
 
 ClientAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, signal = (new AbortController()).signal) {
+  const effectiveFilter = filter => {
+    if (!filter) return
+    if (typeof filter === 'string') return filter
+    if (typeof filter === 'object') return JSON.stringify(filter)
+    return filter
+  }
   return this.client.get('v3/sync', {
     searchParams: {
-      filter: JSON.stringify(filter),
+      filter: effectiveFilter(filter),
       since,
       timeout
     },
