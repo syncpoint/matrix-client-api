@@ -1,5 +1,6 @@
 import { got } from 'got'
 import { randomUUID } from 'crypto'
+import { effectiveFilter } from './convenience.mjs'
 
 const POLL_TIMEOUT = 30000
 const REQUEST_TIMEOUT = 5000
@@ -52,7 +53,7 @@ export default function ClientAPI (credentials) {
 
 
 ClientAPI.prototype.refreshAccessToken = async function (refreshToken) {
-  const tokens = await this.client.post('v3/refresh', {
+  const tokens = await this.client.post('v3/refresh', { // v1 vs v3 !!
     json: {
       refresh_token: refreshToken
     }
@@ -182,6 +183,10 @@ ClientAPI.prototype.getEvent = async function (roomId, eventId) {
   return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`).json()
 }
 
+ClientAPI.prototype.getMessages = async function (roomId, options) {
+  return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams: options }).json()
+}
+
 ClientAPI.prototype.sendToDevice = async function (deviceId, eventType, content = {}, txnId = randomUUID()) {
   const toDeviceMessage = {}
   toDeviceMessage[deviceId] = content
@@ -198,18 +203,17 @@ ClientAPI.prototype.sendToDevice = async function (deviceId, eventType, content 
 }
 
 ClientAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, signal = (new AbortController()).signal) {
-  const effectiveFilter = filter => {
-    if (!filter) return
-    if (typeof filter === 'string') return filter
-    if (typeof filter === 'object') return JSON.stringify(filter)
-    return filter
+  const buildSearchParams = (since, filter, timeout) => {
+    const params = {
+      timeout
+    }
+    if (since) params[since] = since
+    const f = effectiveFilter(filter)
+    if (f) params.filter = f
+    return params
   }
   return this.client.get('v3/sync', {
-    searchParams: {
-      filter: effectiveFilter(filter),
-      since,
-      timeout
-    },
+    searchParams: buildSearchParams(since, filter, timeout),
     signal
   }).json()
 }
