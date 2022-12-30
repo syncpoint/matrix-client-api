@@ -7,7 +7,7 @@ const REQUEST_TIMEOUT = 5000
 const RETRY_LIMIT = 3 // so max. time before an error is thrown is REQUEST_TIMEOUT * RETRY_LIMIT
 
 
-export default function ClientAPI (credentials) {
+export default function HttpAPI (credentials) {
 
   this.credentials = {
     user_id: credentials.user_id,
@@ -52,7 +52,7 @@ export default function ClientAPI (credentials) {
 }
 
 
-ClientAPI.prototype.refreshAccessToken = async function (refreshToken) {
+HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
   const tokens = await this.client.post('v3/refresh', { // v1 vs v3 !!
     json: {
       refresh_token: refreshToken
@@ -65,7 +65,7 @@ ClientAPI.prototype.refreshAccessToken = async function (refreshToken) {
 }
 
 
-ClientAPI.loginWithPassword = async function ({ homeServerUrl, userId, password, deviceId }) {
+HttpAPI.loginWithPassword = async function ({ homeServerUrl, userId, password, deviceId }) {
   const options = {
     type: 'm.login.password',
     identifier: {
@@ -79,7 +79,7 @@ ClientAPI.loginWithPassword = async function ({ homeServerUrl, userId, password,
   return this.login(homeServerUrl, options)
 }
 
-ClientAPI.login = async function (homeServerUrl, options) {
+HttpAPI.login = async function (homeServerUrl, options) {
   const defaults = {
     refresh_token: true
   }     
@@ -97,7 +97,7 @@ ClientAPI.login = async function (homeServerUrl, options) {
   return loginResult
 }
 
-ClientAPI.prototype.logout = async function () {
+HttpAPI.prototype.logout = async function () {
   await this.client.post('v3/logout')
   if (this.refreshTokenJob) {
     clearTimeout(this.refreshTokenJob)
@@ -106,7 +106,7 @@ ClientAPI.prototype.logout = async function () {
   delete this.credentials
 }
 
-ClientAPI.prototype.getRoomHierarchy = async function (roomId) {
+HttpAPI.prototype.getRoomHierarchy = async function (roomId) {
   return this.client.get(`v1/rooms/${encodeURIComponent(roomId)}/hierarchy`, {
     searchParams: {
       limit: 1000,
@@ -116,11 +116,11 @@ ClientAPI.prototype.getRoomHierarchy = async function (roomId) {
   }).json()
 }
 
-ClientAPI.prototype.getRoomId = async function (alias) {
+HttpAPI.prototype.getRoomId = async function (alias) {
   return this.client.get(`v3/directory/room/${encodeURIComponent(alias)}`).json()
 }
 
-ClientAPI.prototype.getRoom = async function (roomId) {
+HttpAPI.prototype.getRoom = async function (roomId) {
   const state = await this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/state`).json()
   const room = state.reduce((acc, event) => {
     switch (event.type) {
@@ -138,56 +138,56 @@ ClientAPI.prototype.getRoom = async function (roomId) {
   return room
 }
 
-ClientAPI.prototype.createRoom = async function (options) {
+HttpAPI.prototype.createRoom = async function (options) {
   return this.client.post('v3/createRoom', { json: options }).json()
 }
 
-ClientAPI.prototype.invite = async function (roomId, userId) {
+HttpAPI.prototype.invite = async function (roomId, userId) {
   return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/invite`, { json: { user_id: userId }}).json()
 }
 
-ClientAPI.prototype.join = async function (roomId) {
+HttpAPI.prototype.join = async function (roomId) {
   return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/join`).json()
 }
 
-ClientAPI.prototype.leave = async function (roomId) {
+HttpAPI.prototype.leave = async function (roomId) {
   return this.client.post(`v3/rooms/${roomId}/leave`).json()
 }
 
-ClientAPI.prototype.forget = async function (roomId) {
+HttpAPI.prototype.forget = async function (roomId) {
   return this.client.post(`v3/rooms/${roomId}/forget`).json()
 }
 
-ClientAPI.prototype.joinedRooms = async function () {
+HttpAPI.prototype.joinedRooms = async function () {
   return this.client.get('v3/joined_rooms').json()
 }
 
 
-ClientAPI.prototype.sendStateEvent = async function (roomId, eventType, content, stateKey) {
+HttpAPI.prototype.sendStateEvent = async function (roomId, eventType, content, stateKey) {
   return this.client.put(`v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}${stateKey ? '/' + encodeURIComponent(stateKey) : '' }`, {
     json: content
   }).json()
 }
 
-ClientAPI.prototype.sendMessageEvent = async function (roomId, eventType, content, txnId = randomUUID()) {
+HttpAPI.prototype.sendMessageEvent = async function (roomId, eventType, content, txnId = randomUUID()) {
   return this.client.put(`v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/${encodeURIComponent(txnId)}`, {
     json: content
   }).json()
 }
 
-ClientAPI.prototype.getRelations = async function (roomId, eventId) {
+HttpAPI.prototype.getRelations = async function (roomId, eventId) {
   return this.client.get(`v1/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}`).json()
 }
 
-ClientAPI.prototype.getEvent = async function (roomId, eventId) {
+HttpAPI.prototype.getEvent = async function (roomId, eventId) {
   return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`).json()
 }
 
-ClientAPI.prototype.getMessages = async function (roomId, options) {
+HttpAPI.prototype.getMessages = async function (roomId, options) {
   return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams: options }).json()
 }
 
-ClientAPI.prototype.sendToDevice = async function (deviceId, eventType, content = {}, txnId = randomUUID()) {
+HttpAPI.prototype.sendToDevice = async function (deviceId, eventType, content = {}, txnId = randomUUID()) {
   const toDeviceMessage = {}
   toDeviceMessage[deviceId] = content
 
@@ -202,7 +202,7 @@ ClientAPI.prototype.sendToDevice = async function (deviceId, eventType, content 
   }).json()
 }
 
-ClientAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, signal = (new AbortController()).signal) {
+HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, signal = (new AbortController()).signal) {
   const buildSearchParams = (since, filter, timeout) => {
     const params = {
       timeout
