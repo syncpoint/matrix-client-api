@@ -207,7 +207,7 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, 
     const params = {
       timeout
     }
-    if (since) params[since] = since
+    if (since) params.since = since
     const f = effectiveFilter(filter)
     if (f) params.filter = f
     return params
