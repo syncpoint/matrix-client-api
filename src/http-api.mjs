@@ -6,6 +6,14 @@ const POLL_TIMEOUT = 30000
 const REQUEST_TIMEOUT = 5000
 const RETRY_LIMIT = 3 // so max. time before an error is thrown is REQUEST_TIMEOUT * RETRY_LIMIT
 
+/**
+ * @readonly
+ * @enum {string}
+ */
+const Direction = {
+  backward: 'b',
+  forward: 'f'
+}
 
 export default function HttpAPI (credentials) {
 
@@ -183,8 +191,28 @@ HttpAPI.prototype.getEvent = async function (roomId, eventId) {
   return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`).json()
 }
 
+/**
+ * @typedef GetMessageQueryParameters
+ * @type {object}
+ * @property {Direction} dir - directon of movement on the timeline.
+ * @property {RoomEventFilter} filter - filter.
+ * @property {StreamKeyToken} from - the token to start.
+ * @property {StreamKeyToken} to - the token to end.
+*/
+
+
+/**
+ * 
+ * @param {string} roomId 
+ * @param {GetMessageQueryParameters} options
+ * @returns 
+ */
 HttpAPI.prototype.getMessages = async function (roomId, options) {
-  return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams: options }).json()
+  const searchParams = {...options}
+  if (searchParams.filter) {
+    searchParams.filter = effectiveFilter(searchParams.filter)
+  }
+  return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams }).json()
 }
 
 HttpAPI.prototype.sendToDevice = async function (deviceId, eventType, content = {}, txnId = randomUUID()) {

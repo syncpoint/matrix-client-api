@@ -1,5 +1,3 @@
-import { effectiveFilter } from "./convenience.mjs"
-
 // const DEFAULT_BATCH_SIZE = 64
 const DEFAULT_POLL_TIMEOUT = 30000
 
@@ -41,19 +39,17 @@ ClientAPI.prototype.sync = async function(since, filter, timeout = 0, signal) {
   }
 }
 
-ClientAPI.prototype.catchUp = async function (roomId, lastKnownSyncToken, currentSyncToken, filter = {}) {
+ClientAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, filter = {}) {
 
   const queryOptions = { 
-    filter: effectiveFilter(filter),
+    filter,
     dir: 'b', // move backwards on the timeline,
-    to: lastKnownSyncToken
-    /* ,
-    limit: this.batchSize */
+    to: lastKnownStreamToken
   }
 
   // Properties "from" and "limited" will be modified during catchUp-phase
   const pagination = {
-    from: currentSyncToken,    
+    from: currentStreamToken,    
     limited: true                      
   }
 
@@ -80,10 +76,10 @@ ClientAPI.prototype.catchUp = async function (roomId, lastKnownSyncToken, curren
 
 
 ClientAPI.prototype.stream = async function* (since, filter, signal = (new AbortController()).signal) {
-  let token
+  let streamToken
   try {
     const initialSync = await this.sync(since, filter, 0)
-    token = initialSync.next_batch
+    streamToken = initialSync.next_batch
     yield initialSync
   } catch (error) {
     const throwable = new Error(error.message)
@@ -93,9 +89,9 @@ ClientAPI.prototype.stream = async function* (since, filter, signal = (new Abort
     
   while (!signal.aborted) {
     try {
-      const syncResult = await this.sync(token, filter, DEFAULT_POLL_TIMEOUT, signal)
-      if (syncResult.next_batch === token) continue // no new events
-      token = syncResult.next_batch
+      const syncResult = await this.sync(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
+      if (syncResult.next_batch === streamToken) continue // no new events
+      streamToken = syncResult.next_batch
       yield syncResult
     } catch (error) {
       const throwable = new Error(error.message)
