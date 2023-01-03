@@ -35,7 +35,7 @@ export default function HttpAPI (credentials) {
       ]
     },
     timeout: {
-      request: REQUEST_TIMEOUT
+      request: REQUEST_TIMEOUT + POLL_TIMEOUT
     }
   }
   
