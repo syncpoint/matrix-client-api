@@ -1,34 +1,44 @@
 import { effectiveFilter } from "./convenience.mjs"
 
-const DEFAULT_BATCH_SIZE = 64
+// const DEFAULT_BATCH_SIZE = 64
+const DEFAULT_POLL_TIMEOUT = 30000
 
-const ClientAPI = function (httpApi, batchSize = DEFAULT_BATCH_SIZE) {
+const ClientAPI = function (httpApi) {
   this.httpApi = httpApi
-  this.batchSize = batchSize
 }
 
-ClientAPI.prototype.sync = async function(since, filter, timeout = 0) {
+ClientAPI.prototype.sync = async function(since, filter, timeout = 0, signal) {
   const events = {}
   const jobs = {}
 
-  const syncResult = await this.httpApi.sync(since, filter, timeout)
+  const syncResult = await this.httpApi.sync(since, filter, timeout, signal)
 
-  for (const [roomId, content] of Object.entries(syncResult.rooms?.join)) {
+  for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
+    if (content.timeline.events?.length === 0) continue
+
     events[roomId] = content.timeline.events
     if (content.timeline.limited) {
       jobs[roomId] = content.timeline.prev_batch
     }
   }
 
-  const catchUp = await Promise.all(
-    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter.room?.timeline))
-  )
-  console.dir(catchUp)
-  catchUp.forEach(result => {
-    events[result.roomId] = [...events[result.roomId], ...result.events]
-  })
+  try {
+    const catchUp = await Promise.all(
+      Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter.room?.timeline))
+    )
+    catchUp.forEach(result => {
+      events[result.roomId] = [...events[result.roomId], ...result.events]
+    })
+  } catch (error) {
+    console.error(error)
+  }
+  
 
-  return events
+  return {
+    since,
+    next_batch: syncResult.next_batch,
+    events
+  }
 }
 
 ClientAPI.prototype.catchUp = async function (roomId, lastKnownSyncToken, currentSyncToken, filter = {}) {
@@ -36,8 +46,9 @@ ClientAPI.prototype.catchUp = async function (roomId, lastKnownSyncToken, curren
   const queryOptions = { 
     filter: effectiveFilter(filter),
     dir: 'b', // move backwards on the timeline,
-    to: lastKnownSyncToken,
-    limit: this.batchSize
+    to: lastKnownSyncToken
+    /* ,
+    limit: this.batchSize */
   }
 
   // Properties "from" and "limited" will be modified during catchUp-phase
@@ -51,8 +62,8 @@ ClientAPI.prototype.catchUp = async function (roomId, lastKnownSyncToken, curren
 
   while (pagination.limited) {
     const options = {...queryOptions, ...pagination}
+
     const batch = await this.httpApi.getMessages(roomId, options)
-    console.log(`${roomId} :: fetched ${batch.chunk.length} events from ${pagination.from} to ${pagination.to}`)
     events = [...events, ...batch.chunk]
     if (batch.end && batch.end !== pagination.to) {
       pagination.from = batch.end
@@ -64,6 +75,33 @@ ClientAPI.prototype.catchUp = async function (roomId, lastKnownSyncToken, curren
   return {
     roomId,
     events
+  }
+}
+
+
+ClientAPI.prototype.stream = async function* (since, filter, signal = (new AbortController()).signal) {
+  let token
+  try {
+    const initialSync = await this.sync(since, filter, 0)
+    token = initialSync.next_batch
+    yield initialSync
+  } catch (error) {
+    const throwable = new Error(error.message)
+    throwable.cause = error
+    yield throwable
+  }
+    
+  while (!signal.aborted) {
+    try {
+      const syncResult = await this.sync(token, filter, DEFAULT_POLL_TIMEOUT, signal)
+      if (syncResult.next_batch === token) continue // no new events
+      token = syncResult.next_batch
+      yield syncResult
+    } catch (error) {
+      const throwable = new Error(error.message)
+      throwable.cause = error
+      yield throwable
+    }
   }
 }
 
