@@ -3,8 +3,7 @@ import { randomUUID } from 'crypto'
 import { effectiveFilter } from './convenience.mjs'
 
 const POLL_TIMEOUT = 30000
-const REQUEST_TIMEOUT = 5000
-const RETRY_LIMIT = 3 // so max. time before an error is thrown is REQUEST_TIMEOUT * RETRY_LIMIT
+const RETRY_LIMIT = 5
 
 /**
  * @readonly
@@ -43,7 +42,9 @@ export default function HttpAPI (credentials) {
       ]
     },
     timeout: {
-      request: REQUEST_TIMEOUT + POLL_TIMEOUT
+      connect: 250,
+      send: 1000,
+      response: 1.1 * POLL_TIMEOUT
     }
   }
   
@@ -96,8 +97,13 @@ HttpAPI.login = async function (homeServerUrl, options) {
   const loginResult = await got.post('v3/login', {
     prefixUrl: new URL('/_matrix/client', homeServerUrl),
     json: body,
+    retry: {
+      limit: 3
+    },
     timeout: {
-      request: REQUEST_TIMEOUT
+      connect: 250,
+      send: 1000,
+      response: 3000
     }
   }).json()
 
