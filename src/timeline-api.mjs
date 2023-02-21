@@ -1,11 +1,11 @@
 // const DEFAULT_BATCH_SIZE = 64
 const DEFAULT_POLL_TIMEOUT = 30000
 
-const ClientAPI = function (httpApi) {
+const TimelineAPI = function (httpApi) {
   this.httpApi = httpApi
 }
 
-ClientAPI.prototype.sync = async function(since, filter, timeout = 0, signal) {
+TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, signal) {
   const events = {}
   const jobs = {}
 
@@ -39,7 +39,7 @@ ClientAPI.prototype.sync = async function(since, filter, timeout = 0, signal) {
   }
 }
 
-ClientAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, filter = {}) {
+TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, filter = {}) {
 
   const queryOptions = { 
     filter,
@@ -75,32 +75,21 @@ ClientAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, curr
 }
 
 
-ClientAPI.prototype.stream = async function* (since, filter, signal = (new AbortController()).signal) {
+TimelineAPI.prototype.stream = async function* (since, filter, signal = (new AbortController()).signal) {
   let streamToken
-  try {
-    const initialSync = await this.sync(since, filter, 0)
-    streamToken = initialSync.next_batch
-    yield initialSync
-  } catch (error) {
-    const throwable = new Error(error.message)
-    throwable.cause = error
-    yield throwable
-  }
+  
+  const initialSync = await this.syncTimeline(since, filter, 0)
+  streamToken = initialSync.next_batch
+  yield initialSync
     
   while (!signal.aborted) {
-    try {
-      const syncResult = await this.sync(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
+      const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
       if (syncResult.next_batch === streamToken) continue // no new events
       streamToken = syncResult.next_batch
       yield syncResult
-    } catch (error) {
-      const throwable = new Error(error.message)
-      throwable.cause = error
-      yield throwable
-    }
   }
 }
 
 export {
-  ClientAPI
+  TimelineAPI
 }

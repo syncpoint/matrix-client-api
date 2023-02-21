@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { effectiveFilter } from './convenience.mjs'
 
 const POLL_TIMEOUT = 30000
-const RETRY_LIMIT = 5
+const RETRY_LIMIT = 0
 
 /**
  * @readonly
@@ -14,7 +14,21 @@ const Direction = {
   forward: 'f'
 }
 
-export default function HttpAPI (credentials) {
+const roomStateReducer = (acc, event) => {
+  switch (event.type) {
+    case 'm.room.create': {
+      acc.type = (event.content?.type === 'm.space') ? 'm.space' : 'm.room'
+      break 
+    }
+    case 'm.room.name': { acc.name = event.content.name; break }
+    case 'm.room.canonical_alias': { acc.canonical_alias = event.content.alias; break }
+    case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
+    case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
+  }
+  return acc
+}
+
+function HttpAPI (credentials) {
 
   this.credentials = {
     user_id: credentials.user_id,
@@ -42,8 +56,8 @@ export default function HttpAPI (credentials) {
       ]
     },
     timeout: {
-      connect: 250,
-      send: 1000,
+      connect: 2500,
+      send: 10000,
       response: 1.1 * POLL_TIMEOUT
     }
   }
@@ -62,15 +76,20 @@ export default function HttpAPI (credentials) {
 
 
 HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
-  const tokens = await this.client.post('v3/refresh', { // v1 vs v3 !!
-    json: {
-      refresh_token: refreshToken
-    }
-  }).json()
-  this.client.defaults.options.context.access_token = tokens.access_token
-  
-  this.refreshTokenJob = setTimeout((token) => this.refreshAccessToken(token), Math.floor(tokens.expires_in_ms * 0.75), tokens.refresh_token)
-  console.log(`Scheduled token refresh in ${Math.floor(tokens.expires_in_ms / 1000 * 0.75)} seconds`)
+  try {
+    const tokens = await this.client.post('v3/refresh', { // v1 vs v3 !!
+      json: {
+        refresh_token: refreshToken
+      }
+    }).json()
+    this.client.defaults.options.context.access_token = tokens.access_token
+    
+    const fractionOfLifetime = 0.95
+    this.refreshTokenJob = setTimeout((token) => this.refreshAccessToken(token), Math.floor(tokens.expires_in_ms * fractionOfLifetime), tokens.refresh_token)
+    console.log(`Scheduled token refresh in ${Math.floor(tokens.expires_in_ms / 1000 * fractionOfLifetime)}s, expires in ${tokens.expires_in_ms / 1000}s`)
+  } catch (error) {
+    console.error('REFRESH ACCESS TOKEN FAILED: ${error.message}')
+  }  
 }
 
 
@@ -101,9 +120,9 @@ HttpAPI.login = async function (homeServerUrl, options) {
       limit: 3
     },
     timeout: {
-      connect: 250,
-      send: 1000,
-      response: 3000
+      connect: 2500,
+      send: 2500,
+      response: 10000
     }
   }).json()
 
@@ -136,32 +155,45 @@ HttpAPI.prototype.getRoomId = async function (alias) {
 
 HttpAPI.prototype.getRoom = async function (roomId) {
   const state = await this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/state`).json()
-  const room = state.reduce((acc, event) => {
-    switch (event.type) {
-      case 'm.room.create': {
-        acc.type = (event.content?.type === 'm.space') ? 'm.space' : 'm.room'
-        break 
-      }
-      case 'm.room.name': { acc.name = event.content.name; break }
-      case 'm.room.canonical_alias': { acc.canonical_alias = event.content.alias; break }
-      case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
-      case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
-    }
-    return acc
-  }, { room_id: roomId })
+  const room = state.reduce(roomStateReducer, { room_id: roomId })
   return room
 }
 
+/**
+ * 
+ * @param {createRoomOptions} options 
+ * @returns 
+ */
 HttpAPI.prototype.createRoom = async function (options) {
   return this.client.post('v3/createRoom', { json: options }).json()
 }
 
+/**
+ * 
+ * @param {string} roomId 
+ * @param {string} userId 
+ * @returns {Promise.<void>} no return value
+ */
 HttpAPI.prototype.invite = async function (roomId, userId) {
   return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/invite`, { json: { user_id: userId }}).json()
 }
 
-HttpAPI.prototype.join = async function (roomId) {
-  return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/join`).json()
+/**
+ * 
+ * @param {string} id - id can either be the roomId OR an alias 
+ * @returns 
+ */
+HttpAPI.prototype.join = async function (id) {
+  /*
+    13jan23/HAL
+    The documentation for this API call (https://spec.matrix.org/v1.4/client-server-api/#post_matrixclientv3joinroomidoralias)
+    does not mention that it is mandatory to append a query parameter "server_name=..." in order to join rooms whows origin
+    is not the user's home server.
+  */
+  const host = id.split(':')[1]
+  const queryParam = (host === this.credentials.home_server) ? '' : `?server_name=${host}`
+  const url = `v3/join/${encodeURIComponent(id)}${queryParam}`
+  return this.client.post(url).json()
 }
 
 HttpAPI.prototype.leave = async function (roomId) {
@@ -250,4 +282,9 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, 
     searchParams: buildSearchParams(since, filter, timeout),
     signal
   }).json()
+}
+
+export {
+  HttpAPI,
+  roomStateReducer
 }
