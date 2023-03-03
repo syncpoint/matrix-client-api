@@ -136,7 +136,7 @@ class MatrixAPI extends EventEmitter {
 
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
-      if (room.type === 'm.space') {
+      if (room.type === 'm.space' && room.id) {
         projects[roomId] = room
       }
     }
@@ -174,7 +174,25 @@ class MatrixAPI extends EventEmitter {
    * @param {MatrixRoomId} globalId - The [matrix] roomId of the project 
    */
   async project (globalId) {
-    return this.httpAPI.getRoomHierarchy(globalId)
+    const hierarchy = await this.httpAPI.getRoomHierarchy(globalId)
+    const layerRoomIds = hierarchy.rooms
+      .filter(room => room.room_type === 'io.syncpoint.odin.layer')
+      .map(room => room.room_id)
+    const filter = {
+      room: {
+        timeline: { not_types: [ '*' ] },
+        rooms: layerRoomIds
+      }
+    }
+    const state = await this.httpAPI.sync(undefined, filter, 0)
+    const layers = {}
+
+    for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
+      const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
+      layers[roomId] = room
+    }
+
+    return layers
   }
 
   /**
@@ -184,13 +202,14 @@ class MatrixAPI extends EventEmitter {
    * @param {string} friendlyName - This name will be shown in the "project" view for every node that gets invited to join the project.
    * @returns 
    */
-  async createProject (localId, friendlyName) {
+  async createProject (localId, friendlyName, description) {
     const creationOptions = {
       name: friendlyName,
-      room_alias_name: localId,
+      topic: description,
       visibility: 'private',
       creation_content: {
         type: 'm.space',  // indicates that the room has the role of a SPACE
+        // type: 'io.syncpoint.odin.project', 3mar23: breaks the parent/child hierarchy
         guest_access: 'forbidden'
       },
       power_level_content_override: {
@@ -220,9 +239,12 @@ class MatrixAPI extends EventEmitter {
     }
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
+
     await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
     })
+    
+    await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
 
     return {
       localId,
@@ -240,12 +262,13 @@ class MatrixAPI extends EventEmitter {
    * @param {string} friendlyName - This name will be shown in the "layer" scope.
    * @returns 
    */
-  async createLayer (localId, friendlyName) {
+  async createLayer (localId, friendlyName, description) {
     const creationOptions = {
       name: friendlyName,
-      room_alias_name: localId,
+      topic: description,
       visibility: 'private',
       creation_content: {
+        type: 'io.syncpoint.odin.layer',
         guest_access: 'forbidden'
       },
       power_level_content_override: 
@@ -273,9 +296,12 @@ class MatrixAPI extends EventEmitter {
     }
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
+
     await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
     })
+    await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
+
     return {
       localId,
       /** @type {MatrixRoomId} */

@@ -17,13 +17,15 @@ const Direction = {
 const roomStateReducer = (acc, event) => {
   switch (event.type) {
     case 'm.room.create': {
-      acc.type = (event.content?.type === 'm.space') ? 'm.space' : 'm.room'
+      acc.type = (event.content?.type) ? event.content.type : 'm.room'
       break 
     }
     case 'm.room.name': { acc.name = event.content.name; break }
     case 'm.room.canonical_alias': { acc.canonical_alias = event.content.alias; break }
+    case 'm.room.topic': { acc.topic = event.content.topic; break }
     case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
     case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
+    case 'io.syncpoint.odin.id': { acc.id = event.content?.id; break }
   }
   return acc
 }
@@ -142,8 +144,6 @@ HttpAPI.prototype.logout = async function () {
 HttpAPI.prototype.getRoomHierarchy = async function (roomId) {
   return this.client.get(`v1/rooms/${encodeURIComponent(roomId)}/hierarchy`, {
     searchParams: {
-      limit: 1000,
-      max_depth: 1,
       suggested_only: false
     }
   }).json()
@@ -154,7 +154,7 @@ HttpAPI.prototype.getRoomId = async function (alias) {
 }
 
 HttpAPI.prototype.getRoom = async function (roomId) {
-  const state = await this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/state`).json()
+  this.state = await this.getState(roomId)
   const room = state.reduce(roomStateReducer, { room_id: roomId })
   return room
 }
@@ -227,6 +227,10 @@ HttpAPI.prototype.getRelations = async function (roomId, eventId) {
 
 HttpAPI.prototype.getEvent = async function (roomId, eventId) {
   return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`).json()
+}
+
+HttpAPI.prototype.getState = async function (roomId) {
+  return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/state`).json()
 }
 
 /**
