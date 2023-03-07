@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { effectiveFilter } from './convenience.mjs'
 
 const POLL_TIMEOUT = 30000
-const RETRY_LIMIT = 0
+const RETRY_LIMIT = 1
 
 /**
  * @readonly
@@ -40,36 +40,55 @@ function HttpAPI (credentials) {
   const clientOptions = {
     prefixUrl: new URL('/_matrix/client', credentials.home_server_url),
     headers: {
-      'User-Agent': 'ODIN/v2'
+      'User-Agent': 'ODIN/v2',
+      'Authorization': `Bearer ${credentials.access_token}`
     },
     context: {
-      access_token: credentials.access_token
+      refresh_token: credentials.refresh_token
     },
     retry: {
       limit: RETRY_LIMIT
     },
     hooks: {
-      beforeRequest: [
-        options => {
-          if (options.context?.access_token) {
-            options.headers.Authorization = `Bearer ${options.context.access_token}`
-          }
-        }
-      ]
+      afterResponse: []
     },
     timeout: {
       connect: 2500,
       send: 10000,
       response: 1.1 * POLL_TIMEOUT
-    }
+    },
+	  mutableDefaults: true
   }
-  
-  if (credentials.refresh_token && credentials.expires_in_ms) {
-    if (this.refreshTokenJob) {
-      clearTimeout(this.refreshTokenJob)
-      this.refreshTokenJob = undefined
-    }
-    setImmediate(() => this.refreshAccessToken(credentials.refresh_token))
+
+  if (credentials.refresh_token) {
+    console.log(`ACCESS TOKEN expires in ${Math.ceil(credentials.expires_in_ms / 1000)}sec! Adding afterResponse hook`)
+    clientOptions.hooks.afterResponse.push(
+      async (response, retryWithMergedOptions) => {
+        if (response.statusCode !== 401) return response;
+
+        const body = JSON.parse(response.body)        
+        if (body?.errcode !== 'M_UNKNOWN_TOKEN' || !body?.soft_logout) {
+          console.error('MATRIX server does not like us anymore :-(', body.error)
+          throw new Error(`${body?.errcode}: ${body?.error}`)
+        }
+
+        // Unauthorized, try to refresh the access token
+          try { 
+            const tokens = await this.refreshAccessToken(this.client.defaults.options.context.refresh_token)            
+            this.client.defaults.options.context.refresh_token = tokens.refresh_token
+
+            const options = {
+              headers: {
+                'Authorization': `Bearer ${tokens.access_token}`
+              }
+            }
+            this.client.defaults.options.merge(options)
+            return retryWithMergedOptions(options)
+          } catch (error) {
+            console.error(error)
+          }
+        }
+    )
   }
 
   this.client = got.extend(clientOptions)
@@ -78,20 +97,11 @@ function HttpAPI (credentials) {
 
 
 HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
-  try {
-    const tokens = await this.client.post('v3/refresh', { // v1 vs v3 !!
+    return this.client.post('v3/refresh', { // v1 vs v3 !!
       json: {
         refresh_token: refreshToken
       }
     }).json()
-    this.client.defaults.options.context.access_token = tokens.access_token
-    
-    const fractionOfLifetime = 0.95
-    this.refreshTokenJob = setTimeout((token) => this.refreshAccessToken(token), Math.floor(tokens.expires_in_ms * fractionOfLifetime), tokens.refresh_token)
-    console.log(`Scheduled token refresh in ${Math.floor(tokens.expires_in_ms / 1000 * fractionOfLifetime)}s, expires in ${tokens.expires_in_ms / 1000}s`)
-  } catch (error) {
-    console.error('REFRESH ACCESS TOKEN FAILED: ${error.message}')
-  }  
 }
 
 
@@ -134,10 +144,6 @@ HttpAPI.login = async function (homeServerUrl, options) {
 
 HttpAPI.prototype.logout = async function () {
   await this.client.post('v3/logout')
-  if (this.refreshTokenJob) {
-    clearTimeout(this.refreshTokenJob)
-    delete this.refreshTokenJob
-  }
   delete this.credentials
 }
 
@@ -280,11 +286,12 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, 
     if (since) params.since = since
     const f = effectiveFilter(filter)
     if (f) params.filter = f
+    params.set_presence = 'unavailable'
     return params
   }
   return this.client.get('v3/sync', {
-    searchParams: buildSearchParams(since, filter, timeout),
-    signal
+    searchParams: buildSearchParams(since, filter, timeout)/* ,
+    signal */
   }).json()
 }
 
