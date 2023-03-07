@@ -14,7 +14,7 @@
   "author": "thomas.halwax@syncpoint.io",
   "license": "UNLICENSED",
   "dependencies": {
-    "got": "^12.5.3"
+    "got": "^12.6.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^7.6.0"
