@@ -34,7 +34,7 @@ class CommandAPI {
       if (error.response?.statusCode === 403) {
         console.error(`Calling ${functionCall[0]} is forbidden: ${error.response.body}`)
         return setImmediate(() => this.execute())
-      } 
+      }
       
       console.log(`Error: ${error.message}`)
       this.scheduledCalls.requeue(functionCall)

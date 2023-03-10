@@ -1,11 +1,7 @@
 import { HttpAPI, roomStateReducer } from './http-api.mjs'
-import { TimelineAPI } from './timeline-api.mjs'
-import { CommandAPI } from './command-api.mjs'
-import { Store } from './store.mjs'
-import { EventEmitter } from 'node:events'
+/* import { TimelineAPI } from './timeline-api.mjs'
+import { CommandAPI } from './command-api.mjs' */
 
-const MESSAGE_EVENT_TYPE = 'm.room.message'
-const DEFAULT_POLLING_INTERVAL = 30_000
 const MAX_BATCH_SIZE = 64
 
 const EVENT_TYPES = {
@@ -27,6 +23,7 @@ const EVENT_TYPES = {
   */
 const EVENTS = {
   'PROJECT/INVITED': 'project/invited',
+  'PROJECT/RENAMED': 'project/renamed',
   'LAYER/ADDED': 'layer/added',
   'LAYER/RENAMED': 'layer/renamed',
   'LAYER/REMOVED': 'layer/removed',
@@ -50,49 +47,13 @@ const ROOM_TYPE = {
 
 /**
  * @description Designed for usage in ODINv2.
+ * @typedef {Object} MatrixAPI
  */
-class MatrixAPI extends EventEmitter {
-  constructor (credentials, projectId) {
-    super()
-    this.projectId = projectId
-    this.httpAPI = new HttpAPI(credentials)
-    this.timelineAPI = new TimelineAPI(this.httpAPI)
-    this.commandAPI = new CommandAPI(this.httpAPI)
-    this.credentials = credentials
-
-    this.store = new Store({
-      controller: new AbortController(),
-      timeout: 0
-    })
+class StructureAPI {
+  constructor (httpAPI) {
+    this.httpAPI = httpAPI
   }
 
-  static Builder = () => new MatrixAPI._Builder()
-
-  static _Builder = class {
-    useProjectId (projectId) {
-      this.projectId = projectId
-      return this
-    }
-
-    useCredentials (credentials) {
-      this.credentials = credentials
-      return this
-    }
-
-    async build () {
-      if (!this.credentials) throw new Error('Missing credentials. Please use "useCredentials".')
-      const loginResult = await MatrixAPI.login(this.credentials)
-      return new MatrixAPI(loginResult, this.projectId)
-    }
-  }
-
-  static async login (loginParams) {
-    return HttpAPI.loginWithPassword(loginParams)
-  }
-
-  async logout () {
-    return this.httpAPI.logout()
-  }
 
   /**
    * @description Returns an array of project structures that the currently logged in user is invited to
@@ -108,7 +69,7 @@ class MatrixAPI extends EventEmitter {
 
     for (const [roomId, content] of Object.entries(state.rooms?.invite || {})) {
       const room = content.invite_state.events.reduce(roomStateReducer, { room_id: roomId })
-      if (room.type === 'm.space') {
+      if (room.type === 'm.space' && room.id) {
         projects[roomId] = room
       }
     }
@@ -122,7 +83,7 @@ class MatrixAPI extends EventEmitter {
   async projects () {
     /*
       Sadly the API call "joinedRoom" is not sufficient since it returns only roomIds without any type information.
-      Thus we cannot distinguishe between projects (spaces) and layers. The sync call is way more expensive but brings
+      Thus we cannot distinguish between projects (spaces) and layers. The sync call is way more expensive but brings
       all the data we need.
     */
 
@@ -210,7 +171,8 @@ class MatrixAPI extends EventEmitter {
       creation_content: {
         type: 'm.space',  // indicates that the room has the role of a SPACE
         // type: 'io.syncpoint.odin.project', 3mar23: breaks the parent/child hierarchy
-        guest_access: 'forbidden'
+        guest_access: 'forbidden',
+        'io.syncpoint.odin.id': localId
       },
       power_level_content_override: {
         'users_default': 0,
@@ -244,7 +206,7 @@ class MatrixAPI extends EventEmitter {
       guest_access: 'forbidden'
     })
     
-    await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
+    // await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
 
     return {
       localId,
@@ -269,7 +231,8 @@ class MatrixAPI extends EventEmitter {
       visibility: 'private',
       creation_content: {
         type: 'io.syncpoint.odin.layer',
-        guest_access: 'forbidden'
+        guest_access: 'forbidden',
+        'io.syncpoint.odin.id': localId
       },
       power_level_content_override: 
       {
@@ -300,7 +263,7 @@ class MatrixAPI extends EventEmitter {
     await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
     })
-    await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
+    // await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
 
     return {
       localId,
@@ -370,89 +333,8 @@ class MatrixAPI extends EventEmitter {
     this.commandAPI.schedule(['sendMessageEvent', globalLayerId, MESSAGE_EVENT_TYPE, message])
   }
 
-
-  async start (previousStreamToken) {
-    const buildProjectFilter = hierarchy => {
-      const filter = { 
-        room: {
-          rooms: hierarchy.rooms?.map(r => r.room_id),
-          timeline: { limit: MAX_BATCH_SIZE, types: [...EVENT_TYPES.STATE, ...EVENT_TYPES.MESSAGE] },
-          ephemeral: {
-            not_types: [ '*' ]
-          }
-        }
-      }
-      return filter
-    }
-
-    const dispatch = timeline => {
-      console.dir(timeline)
-      if (timeline instanceof Error) {
-        console.error(timeline.message)
-        this.store.setDelay(DEFAULT_POLLING_INTERVAL, true)
-        this.store.setStreamToken(this.store.getState().streamToken)
-        return
-      }
-      this.store.setTimeout(DEFAULT_POLLING_INTERVAL, true)
-      this.store.setDelay(0, true)
-      this.store.setStreamToken(timeline.next_batch)
-    }
-
-    const doSync = async ({ streamToken, filter, timeout, controller }, dispatch) => {
-      console.log('DOSYNC', streamToken)
-      try {
-        const timeline = await this.timelineAPI.syncTimeline(streamToken, filter, timeout, controller.signal)
-        dispatch(timeline)
-      } catch (error) {
-        
-        dispatch(error)
-      }      
-    }  
-
-
-    if (this.projectId) {
-      
-      const hierarchy = await this.project(this.projectId)
-      const filter = buildProjectFilter(hierarchy)
-
-      this.store.on('streamToken', () => {
-        const currentState = this.store.getState()
-        setTimeout(doSync, currentState.delay, currentState, dispatch)
-      })
-
-      this.store.setFilter(filter, true)
-      this.store.setStreamToken(previousStreamToken) // triggers call to doSync(...)
-    }
-
-    
-
-
-    /*
-      SCOPE.PROJECT_LIST:
-      We wait for new project invitations and react if the name of the project changes.
-
-      1) retrieve all projects the user is invited to but has not joined
-      2) create a filter
-      3) start syncing and emitting events
-      4) returns void
-    */
-    
-    
-
-
-    
-  }
-
-
-  async stop() {
-    this.store.controller.abort()
-  }
-
-
-  
-
 }
 
 export {
-  MatrixAPI
+  StructureAPI
 }
