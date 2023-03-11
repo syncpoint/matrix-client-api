@@ -1,4 +1,4 @@
-import { roomStateReducer } from './http-api.mjs'
+import { roomStateReducer } from './convenience.mjs'
 
 const MAX_BATCH_SIZE = 64
 
