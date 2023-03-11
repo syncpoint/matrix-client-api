@@ -42,8 +42,27 @@ const timelineQueryParams = (roomState, filter, limit) => {
   }
 }
 
+
+const roomStateReducer = (acc, event) => {
+  switch (event.type) {
+    case 'm.room.create': {
+      acc.type = (event.content?.type) ? event.content.type : 'm.room'
+      acc.id = event.content['io.syncpoint.odin.id']
+      break 
+    }
+    case 'm.room.name': { acc.name = event.content.name; break }
+    case 'm.room.canonical_alias': { acc.canonical_alias = event.content.alias; break }
+    case 'm.room.topic': { acc.topic = event.content.topic; break }
+    case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
+    case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
+    // case 'io.syncpoint.odin.id': { acc.id = event.content?.id; break }
+  }
+  return acc
+}
+
 export {
   effectiveFilter,
   invitedSpaces,
-  timelineQueryParams
+  timelineQueryParams,
+  roomStateReducer
 }
