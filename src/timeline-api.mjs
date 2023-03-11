@@ -5,8 +5,22 @@ const TimelineAPI = function (httpApi) {
   this.httpApi = httpApi
 }
 
+TimelineAPI.prototype.credentials = function () {
+  return this.httpApi.credentials
+}
+
 TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, signal) {
+  /*
+    We want the complete timeline for all rooms that we have already joined. Thus we get the most recent
+    events and then iterate over partial results until we filled the gap. The order of the events shall be 
+    oldes first. 
+
+    All events regarding invited rooms will not be catched up since we are typically interested in invitations
+    and name changes only.
+  */
+
   const events = {}
+  // for catching up 
   const jobs = {}
 
   const syncResult = await this.httpApi.sync(since, filter, timeout, signal)
@@ -20,9 +34,10 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
     }
   }
 
+  // get the complete timeline for all rooms that we have already joined
   try {
     const catchUp = await Promise.all(
-      Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter.room?.timeline))
+      Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter?.room?.timeline))
     )
     catchUp.forEach(result => {
       events[result.roomId] = [...events[result.roomId], ...result.events]
@@ -30,7 +45,17 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
   } catch (error) {
     console.error(error)
   }
-  
+
+  // revert order of events to oldest first
+  Object.keys(events).forEach(roomId => {
+    events[roomId].reverse()
+  })
+
+  for (const [roomId, content] of Object.entries(syncResult.rooms?.invite || {})) {
+    if (content.invite_state.events?.length === 0) continue
+
+    events[roomId] = content.invite_state.events
+  }
 
   return {
     since,
@@ -96,7 +121,6 @@ TimelineAPI.prototype.stream = async function* (since, filter, signal = (new Abo
       const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
       coolOffTime = 0
       if (streamToken !== syncResult.next_batch) {
-        console.log('streamToken changed to ', syncResult.next_batch)
         streamToken = syncResult.next_batch
         console.log('This was request # ', requestCounter)
         requestCounter++
