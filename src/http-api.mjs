@@ -287,7 +287,6 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, 
     if (since) params.since = since
     const f = effectiveFilter(filter)
     if (f) params.filter = f
-    params.set_presence = 'unavailable'
     return params
   }
   return this.client.get('v3/sync', {
