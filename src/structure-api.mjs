@@ -1,6 +1,4 @@
-import { HttpAPI, roomStateReducer } from './http-api.mjs'
-/* import { TimelineAPI } from './timeline-api.mjs'
-import { CommandAPI } from './command-api.mjs' */
+import { roomStateReducer } from './http-api.mjs'
 
 const MAX_BATCH_SIZE = 64
 
@@ -9,27 +7,7 @@ const EVENT_TYPES = {
   MESSAGE: ['m.room.message']
 }
 
-/*
-    emit('project/invited') - for projects
-    emit('layer/added')
-    emit('layer/removed') - I.e. if a user get's kicked/banned it looks like the layer has been removed
-    emit('layer/renamed)
-    emit('message) -> ODINv2 related payload
-    emit('stream') -> The [matrix] stream token
-  */
- /**
-  * @readonly
-  * @enum
-  */
-const EVENTS = {
-  'PROJECT/INVITED': 'project/invited',
-  'PROJECT/RENAMED': 'project/renamed',
-  'LAYER/ADDED': 'layer/added',
-  'LAYER/RENAMED': 'layer/renamed',
-  'LAYER/REMOVED': 'layer/removed',
-  'MESSAGE': 'message',
-  'STREAMTOKEN': 'streamtoken'
-}
+
 
 /**
  * @readonly
@@ -54,6 +32,9 @@ class StructureAPI {
     this.httpAPI = httpAPI
   }
 
+  credentials () {
+    return this.httpAPI.credentials
+  }
 
   /**
    * @description Returns an array of project structures that the currently logged in user is invited to
@@ -286,7 +267,7 @@ class StructureAPI {
       auto_join: false,
       suggested: false,
       via: [
-        this.credentials.home_server
+        this.httpAPI.credentials.home_server
       ]
     }
 
