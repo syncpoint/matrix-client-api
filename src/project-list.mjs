@@ -1,3 +1,5 @@
+import { roomStateReducer } from "./convenience.mjs"
+
 
 const wrap = handler => {
   const proxyHandler = {
@@ -16,10 +18,23 @@ const wrap = handler => {
 const ProjectList = function ({ structureAPI, timelineAPI }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
+
+  /*
+    wellKnown maps the keys of matrix to ODIN and vice-versa
+  */
+  this.wellKnown = new Map()
 }
 
 ProjectList.prototype.hydrate = async function () {
-  
+
+  const joined = await this.joined()
+  const invited = await this.invited()
+  const myProjects = {...joined, ...invited}
+
+  Object.entries(myProjects).forEach(([roomId, roomState]) => {
+    this.wellKnown.set(roomId, roomState.id)  // upstream (matrix) => downstream (ODIN)
+    this.wellKnown.set(roomState.id, roomId)
+  })
 }
 
 ProjectList.prototype.share = async function (projectId) {
@@ -36,14 +51,12 @@ ProjectList.prototype.invited = async function () {
 }
 
 ProjectList.prototype.joined = async function () {
-  const projects = await this.structureAPI.projects()
-  const odinProjects = Object.values(projects).map((value) => {
-
-  })
+  return this.structureAPI.projects()
 }
 
 ProjectList.prototype.join = async function (projectId) {
-  return this.structureAPI.join(projectId)
+  const upstreamId = this.wellKnown.get(projectId)
+  return this.structureAPI.join(upstreamId)
 }
 
 ProjectList.prototype.members = async function (projectId) {
@@ -73,7 +86,6 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
 
   this.stream = this.timelineAPI.stream(streamToken, filter)
   for await (const chunk of this.stream) {
-    // console.dir(chunk, { depth: 5 })
 
     if (chunk instanceof Error) {
       console.error(chunk.message)      
@@ -86,33 +98,57 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
       continue
     }
 
+    /*
+      We receive room-related events. Since we are only interested in invitations or
+      room name changes we need to check which handler to apply.
 
-    const eventsByType = {}
-    EVENT_TYPES.forEach(eventType => {
-      eventsByType[eventType] = []
+      ROOM NAME CHANGED
+        there is NO m.room.member event
+
+
+      INVITATION:
+        there is at least ONE m.room.member event and the state key must
+        be the current user
+    */
+
+    Object.entries(chunk.events).forEach(async ([roomId, content]) => {
+      const isInvitation = content
+        .find(event => event.type === 'm.room.member' 
+           && event.state_key === this.timelineAPI.credentials().user_id
+           && event.content?.membership === 'invite'
+        )
+      
+      if (isInvitation) {
+        const roomState = content.reduce(roomStateReducer, {})
+        if (roomState.type === 'm.space' && roomState.id) {
+          // does look like an ODIN project
+          this.wellKnown.set(roomId, roomState.id)
+          this.wellKnown.set(roomState.id, roomId)
+          await streamHandler.invited(roomState)
+        }
+        
+      } else {
+        const named = content.find(event => event.type === "m.room.name")
+        const projectId = this.wellKnown.get(roomId)
+        const renamed = {
+          id: projectId,
+          name: named.content.name
+        }
+        await streamHandler.renamed(renamed)
+      }
     })
 
-    const flattenedEvents = Object.entries(chunk.events)
-      .map(([roomId, roomEvents]) => {
-        return roomEvents.map(event => ({
-          content: event.content,
-          event_id: event.event_id,
-          origin_server_ts: event.origin_server_ts,
-          roomId,
-          sender: event.sender,          
-          state_key: event.state_key,
-          type: event.type          
-        }))
-      })
-      .flat()
-
-    const buckets = flattenedEvents.reduce((acc, current) => {
-      acc[current.type].push(current)
-      return acc
-    }, eventsByType)
+ 
     
-    await streamHandler['m.room.member'](buckets['m.room.member'])
-    await streamHandler['m.room.name'](buckets['m.room.name'])
+    /*  We are only interested in name changes for ODIN projects that we either
+        have already joined or are invited to join.
+        The sync API does not know what ODIN projects are and sends us
+        changes for all spaces/rooms.
+    */
+    /* await streamHandler['m.room.name'](
+      buckets['m.room.name'].filter(event => this.wellKnown.has(event.roomId))
+    ) */
+
     await streamHandler.streamToken(chunk.next_batch)
   }
   
