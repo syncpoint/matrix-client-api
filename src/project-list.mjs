@@ -10,6 +10,14 @@ const wrap = handler => {
   return new Proxy(handler, proxyHandler)
 }
 
+const domainMapper = matrixRoomState => {
+  const project = {...matrixRoomState}
+  delete project.room_id
+  delete project.type
+  delete project.children
+  return project
+}
+
 
 /**
  * 
@@ -27,8 +35,8 @@ const ProjectList = function ({ structureAPI, timelineAPI }) {
 
 ProjectList.prototype.hydrate = async function () {
 
-  const joined = await this.joined()
-  const invited = await this.invited()
+  const joined = await this.structureAPI.projects()
+  const invited = await this.structureAPI.invitedProjects()
   const myProjects = {...joined, ...invited}
 
   Object.entries(myProjects).forEach(([roomId, roomState]) => {
@@ -47,20 +55,21 @@ ProjectList.prototype.invite = async function (projectId, users) {
 
 ProjectList.prototype.invited = async function () {
   // all projects the user is invited but has not joined
-  return this.structureAPI.invitedProjects()
+  const invited = await this.structureAPI.invitedProjects()
+  return Object.values(invited).map(domainMapper)
 }
 
 ProjectList.prototype.joined = async function () {
-  return this.structureAPI.projects()
+  const joined = await this.structureAPI.projects()
+  return Object.values(joined).map(domainMapper)
 }
 
 ProjectList.prototype.join = async function (projectId) {
   const upstreamId = this.wellKnown.get(projectId)
-  return this.structureAPI.join(upstreamId)
-}
-
-ProjectList.prototype.members = async function (projectId) {
-  // returns a list of members
+  await this.structureAPI.join(upstreamId)
+  return {
+    id: projectId
+  }
 }
 
 ProjectList.prototype.start = async function (streamToken, handler = {}) {
@@ -124,7 +133,8 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
           // does look like an ODIN project
           this.wellKnown.set(roomId, roomState.id)
           this.wellKnown.set(roomState.id, roomId)
-          await streamHandler.invited(roomState)
+
+          await streamHandler.invited(domainMapper(roomState))
         }
         
       } else {
@@ -137,17 +147,6 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
         await streamHandler.renamed(renamed)
       }
     })
-
- 
-    
-    /*  We are only interested in name changes for ODIN projects that we either
-        have already joined or are invited to join.
-        The sync API does not know what ODIN projects are and sends us
-        changes for all spaces/rooms.
-    */
-    /* await streamHandler['m.room.name'](
-      buckets['m.room.name'].filter(event => this.wellKnown.has(event.roomId))
-    ) */
 
     await streamHandler.streamToken(chunk.next_batch)
   }
