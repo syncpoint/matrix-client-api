@@ -18,18 +18,11 @@ const domainMapper = matrixRoomState => {
   return project
 }
 
-
-/**
- * 
- * @param {MatrixAPI} matrixAPI 
- */
 const ProjectList = function ({ structureAPI, timelineAPI }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
-
-  /*
-    wellKnown maps the keys of matrix to ODIN and vice-versa
-  */
+  
+  // wellKnown maps the keys of matrix to ODIN and vice-versa  
   this.wellKnown = new Map()
 }
 
@@ -42,15 +35,23 @@ ProjectList.prototype.hydrate = async function () {
   Object.entries(myProjects).forEach(([roomId, roomState]) => {
     this.wellKnown.set(roomId, roomState.id)  // upstream (matrix) => downstream (ODIN)
     this.wellKnown.set(roomState.id, roomId)
+    console.log(`hydrated ${roomId} <> ${roomState.id}`)
   })
 }
 
-ProjectList.prototype.share = async function (projectId) {
-  // share/publish an existing local project
+ProjectList.prototype.share = async function (projectId, name, description) {
+  const result = await this.structureAPI.createProject(projectId, name, description)
+  this.wellKnown.set(result.globalId, result.localId)
+  this.wellKnown.set(result.localId, result.globalId)
+  return {
+    projectId
+  }
 }
 
-ProjectList.prototype.invite = async function (projectId, users) {
-  // invite new users
+ProjectList.prototype.invite = async function (projectId, userId) {
+  const upstreamId = this.wellKnown.get(projectId)
+  const result = await this.structureAPI.invite(upstreamId, userId)
+  return result
 }
 
 ProjectList.prototype.invited = async function () {
@@ -84,7 +85,12 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
       not_types:  [ '*' ]
     },
     room: {
-      timeline: { limit: 1000, types: EVENT_TYPES },
+      timeline: { 
+        lazy_load_members: true, // improve performance
+        limit: 1000, 
+        types: EVENT_TYPES, 
+        not_senders: [ this.timelineAPI.credentials().user_id ] // NO events if the current user is the sender
+      },
       ephemeral: {
         not_types: [ '*' ]
       }
@@ -102,10 +108,10 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
       continue
     }
 
-    if (Object.keys(chunk.events).length === 0) {
-      await streamHandler.streamToken(chunk.next_batch)
-      continue
-    }
+    // just store the next batch value no matter if we will process the stream any further 
+    await streamHandler.streamToken(chunk.next_batch)
+
+    if (Object.keys(chunk.events).length === 0) continue
 
     /*
       We receive room-related events. Since we are only interested in invitations or
@@ -121,9 +127,11 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
     */
 
     Object.entries(chunk.events).forEach(async ([roomId, content]) => {
+
+      const self = this.timelineAPI.credentials().user_id
       const isInvitation = content
         .find(event => event.type === 'm.room.member' 
-           && event.state_key === this.timelineAPI.credentials().user_id
+           && event.state_key === self
            && event.content?.membership === 'invite'
         )
       
@@ -139,6 +147,10 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
         
       } else {
         const named = content.find(event => event.type === "m.room.name")
+        if (!named) return 
+        /*
+          We ignore membership changes of other users for now.
+        */
         const projectId = this.wellKnown.get(roomId)
         const renamed = {
           id: projectId,
@@ -148,9 +160,8 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
       }
     })
 
-    await streamHandler.streamToken(chunk.next_batch)
-  }
-  
+    
+  }  
 }
 
 ProjectList.prototype.stop = async function () {
