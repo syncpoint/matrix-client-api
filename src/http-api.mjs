@@ -1,9 +1,10 @@
-import { got } from 'got'
+// import { got } from 'got'
+import ky from 'ky-universal'
 import { randomUUID } from 'crypto'
 import { effectiveFilter } from './convenience.mjs'
 
 const POLL_TIMEOUT = 30000
-const RETRY_LIMIT = 1
+const RETRY_LIMIT = 2
 
 /**
  * @readonly
@@ -17,64 +18,52 @@ function HttpAPI (credentials) {
 
   this.credentials = {
     user_id: credentials.user_id,
-    home_server: credentials.home_server
+    home_server: credentials.home_server,
+    refresh_token: credentials.refresh_token,
+    access_token: credentials.access_token
   }
  
   const clientOptions = {
     prefixUrl: new URL('/_matrix/client', credentials.home_server_url),
     headers: {
-      'User-Agent': 'ODIN/v2',
-      'Authorization': `Bearer ${credentials.access_token}`
-    },
-    context: {
-      refresh_token: credentials.refresh_token
+      'User-Agent': 'ODIN/v2'
     },
     retry: {
-      limit: RETRY_LIMIT
+      limit: RETRY_LIMIT,
+      statusCodes: [401, 408, 413, 429, 500, 502, 503, 504]
     },
     hooks: {
-      afterResponse: []
-    },
-    timeout: {
-      connect: 2500,
-      send: 10000,
-      response: 1.1 * POLL_TIMEOUT
-    },
-	  mutableDefaults: true
-  }
-
-  if (credentials.refresh_token) {
-    console.log(`ACCESS TOKEN expires in ${Math.ceil(credentials.expires_in_ms / 1000)}sec! Adding afterResponse hook`)
-    clientOptions.hooks.afterResponse.push(
-      async (response, retryWithMergedOptions) => {
-        if (response.statusCode !== 401) return response;
-
-        const body = JSON.parse(response.body)        
-        if (body?.errcode !== 'M_UNKNOWN_TOKEN' || !body?.soft_logout) {
-          console.error('MATRIX server does not like us anymore :-(', body.error)
-          throw new Error(`${body?.errcode}: ${body?.error}`)
+      beforeRequest: [
+        request => { 
+          request.headers.set('Authorization', `Bearer ${this.credentials.access_token}`)
         }
+      ],
+      beforeRetry: [
+        async ({ error }) => {
+          if (error.response.status !== 401) return
 
-        // Unauthorized, try to refresh the access token
+          const body = await error.response.json()
+          if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
+            console.error('MATRIX server does not like us anymore :-(', body.error)
+            throw new Error(`${body.errcode}: ${body.error}`)
+          }
+
           try { 
-            const tokens = await this.refreshAccessToken(this.client.defaults.options.context.refresh_token)            
-            this.client.defaults.options.context.refresh_token = tokens.refresh_token
-
-            const options = {
-              headers: {
-                'Authorization': `Bearer ${tokens.access_token}`
-              }
-            }
-            this.client.defaults.options.merge(options)
-            return retryWithMergedOptions(options)
+            const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
+            this.credentials.refresh_token = tokens.refresh_token
+            /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
+            this.credentials.access_token = tokens.access_token
           } catch (error) {
             console.error(error)
           }
+        
         }
-    )
+      ]
+    },
+    timeout: 1.1 * POLL_TIMEOUT * RETRY_LIMIT
   }
 
-  this.client = got.extend(clientOptions)
+  this.client = ky.extend(clientOptions)
 
 }
 
@@ -108,17 +97,17 @@ HttpAPI.login = async function (homeServerUrl, options) {
   }     
   const body = {...defaults, ...options}
 
-  const loginResult = await got.post('v3/login', {
+  const loginResult = await ky.post('v3/login', {
     prefixUrl: new URL('/_matrix/client', homeServerUrl),
     json: body,
     retry: {
       limit: 3
-    },
+    }/* ,
     timeout: {
       connect: 2500,
       send: 2500,
       response: 10000
-    }
+    } */
   }).json()
 
   loginResult.home_server_url = homeServerUrl
