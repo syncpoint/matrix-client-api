@@ -73,6 +73,16 @@ ProjectList.prototype.join = async function (projectId) {
   }
 }
 
+ProjectList.prototype.setName = async function (projectId, name) {
+  const upstreamId = this.wellKnown.get(projectId)
+  return this.structureAPI.setName(upstreamId, name)
+}
+
+ProjectList.prototype.setDescription = async function (projectId, description) {
+  const upstreamId = this.wellKnown.get(projectId)
+  return this.structureAPI.setTopic(upstreamId, description)
+}
+
 ProjectList.prototype.start = async function (streamToken, handler = {}) {
   if (this.stream) return //already started
 

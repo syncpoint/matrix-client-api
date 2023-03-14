@@ -300,8 +300,12 @@ class StructureAPI {
    * @param {*} friendlyName - The new name of the layer or project
    * @returns 
    */
-  async rename (globalId, friendlyName) {
-    return this.httpAPI.sendStateEvent(globalId, 'm.room.name', { name: friendlyName })
+  async setName (globalId, name) {
+    return this.httpAPI.sendStateEvent(globalId, 'm.room.name', { name })
+  }
+
+  async setTopic (globalId, topic) {
+    return this.httpAPI.sendStateEvent(globalId, 'm.room.topic', { topic })
   }
 
   /**
