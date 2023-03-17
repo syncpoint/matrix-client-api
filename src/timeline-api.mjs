@@ -95,7 +95,7 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 }
 
 
-TimelineAPI.prototype.stream = async function* (since, filter, signal = (new AbortController()).signal) {
+TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = (new AbortController()).signal) {
   
   /**
    * @param {Number} retryCounter 
@@ -116,6 +116,7 @@ TimelineAPI.prototype.stream = async function* (since, filter, signal = (new Abo
   while (!signal.aborted) {
     try {
       await chill(retryCounter)
+      const filter = filterProvider()
       const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
       retryCounter = 0
       if (streamToken !== syncResult.next_batch) {

@@ -109,7 +109,7 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
 
   const streamHandler = wrap(handler)
 
-  this.stream = this.timelineAPI.stream(streamToken, filter)
+  this.stream = this.timelineAPI.stream(streamToken, () => filter)
   for await (const chunk of this.stream) {
 
     if (chunk instanceof Error) {
