@@ -113,7 +113,6 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
   for await (const chunk of this.stream) {
 
     if (chunk instanceof Error) {
-      console.error(chunk.message)      
       await streamHandler.error(chunk)
       continue
     }

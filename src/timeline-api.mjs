@@ -1,4 +1,3 @@
-// const DEFAULT_BATCH_SIZE = 64
 const DEFAULT_POLL_TIMEOUT = 30000
 
 const TimelineAPI = function (httpApi) {
@@ -9,7 +8,7 @@ TimelineAPI.prototype.credentials = function () {
   return this.httpApi.credentials
 }
 
-TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, signal) {
+TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) {
   /*
     We want the complete timeline for all rooms that we have already joined. Thus we get the most recent
     events and then iterate over partial results until we filled the gap. The order of the events shall be 
@@ -23,7 +22,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
   // for catching up 
   const jobs = {}
 
-  const syncResult = await this.httpApi.sync(since, filter, timeout, signal)
+  const syncResult = await this.httpApi.sync(since, filter, timeout)
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
     if (content.timeline.events?.length === 0) continue
@@ -35,16 +34,12 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
   }
 
   // get the complete timeline for all rooms that we have already joined
-  try {
-    const catchUp = await Promise.all(
-      Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter?.room?.timeline))
-    )
-    catchUp.forEach(result => {
-      events[result.roomId] = [...events[result.roomId], ...result.events]
-    })
-  } catch (error) {
-    console.error(error)
-  }
+  const catchUp = await Promise.all(
+    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter?.room?.timeline))
+  )
+  catchUp.forEach(result => {
+    events[result.roomId] = [...events[result.roomId], ...result.events]
+  })
 
   // revert order of events to oldest first
   Object.keys(events).forEach(roomId => {
@@ -101,36 +96,36 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 
 
 TimelineAPI.prototype.stream = async function* (since, filter, signal = (new AbortController()).signal) {
-  let streamToken = since
   
-  const initialSync = await this.syncTimeline(since, filter, 0)
-  streamToken = initialSync.next_batch
-  yield initialSync
-
-  const delay = value => new Promise((resolve) => {
+  /**
+   * @param {Number} retryCounter 
+   * @returns A promise that resolves after a calculated time depending on the retryCounter using an exponential back-off algorithm. The max. delay is 30s.
+   */
+  const chill = retryCounter => new Promise((resolve) => {
+    const BACKOFF_FACTOR = 0.5
+    const BACKOFF_LIMIT = 30_000
+    const delay = Math.min(BACKOFF_LIMIT, (retryCounter === 0 ? 0 : BACKOFF_FACTOR * (2 ** (retryCounter)) * 1000))
     setTimeout(() => {
       resolve()
-    }, value);
+    }, delay);
   })
 
-  let requestCounter = 1
-  let coolOffTime = 0 // time in ms to wait before next try, changed in case of an error
+  let streamToken = since
+  let retryCounter = 0
+  
   while (!signal.aborted) {
     try {
-      await delay(coolOffTime)
+      await chill(retryCounter)
       const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
-      coolOffTime = 0
+      retryCounter = 0
       if (streamToken !== syncResult.next_batch) {
         streamToken = syncResult.next_batch
-        console.log('This was request # ', requestCounter)
-        requestCounter++
         yield syncResult
       }
     } catch (error) {
-      coolOffTime = 30_000
-      yield new Error('probably offline')
-    }
-      
+      retryCounter++
+      yield new Error(error)
+    }      
   }
 }
 

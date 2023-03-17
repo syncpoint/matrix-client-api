@@ -1,5 +1,5 @@
 // import { got } from 'got'
-import ky from 'ky-universal'
+import ky, { HTTPError } from 'ky-universal'
 import { randomUUID } from 'crypto'
 import { effectiveFilter } from './convenience.mjs'
 
@@ -40,22 +40,34 @@ function HttpAPI (credentials) {
       ],
       beforeRetry: [
         async ({ error }) => {
-          if (error.response.status !== 401) return
+          // TODO: check type of Error
+          // instanceof HttpError vs TypeError?
+          if (error instanceof HTTPError) {
 
-          const body = await error.response.json()
-          if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
-            console.error('MATRIX server does not like us anymore :-(', body.error)
-            throw new Error(`${body.errcode}: ${body.error}`)
+            if (error.response.status !== 401) return
+
+            const body = await error.response.json()
+            if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
+              console.error('MATRIX server does not like us anymore :-(', body.error)
+              throw new Error(`${body.errcode}: ${body.error}`)
+            }
+
+            try { 
+              const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
+              this.credentials.refresh_token = tokens.refresh_token
+              /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
+              this.credentials.access_token = tokens.access_token
+            } catch (error) {
+              console.error(error)
+            }
+
+            return
           }
 
-          try { 
-            const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
-            this.credentials.refresh_token = tokens.refresh_token
-            /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
-            this.credentials.access_token = tokens.access_token
-          } catch (error) {
-            console.error(error)
-          }
+          throw error
+          
+
+          
         
         }
       ]
@@ -250,7 +262,7 @@ HttpAPI.prototype.sendToDevice = async function (deviceId, eventType, content = 
   }).json()
 }
 
-HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, signal = (new AbortController()).signal) {
+HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT) {
   const buildSearchParams = (since, filter, timeout) => {
     const params = {
       timeout
@@ -261,8 +273,7 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, 
     return params
   }
   return this.client.get('v3/sync', {
-    searchParams: buildSearchParams(since, filter, timeout)/* ,
-    signal */
+    searchParams: buildSearchParams(since, filter, timeout)
   }).json()
 }
 
