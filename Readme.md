@@ -1,8 +1,8 @@
 # MATRIX Client API
 
-This is a purpose built wrapper for the Matrix API and by no neans a general-purpose SDK! It creates abstractions like `project-list` and `project` which are only suitable for ODINv2 replication. It's designed to support both nodejs and broeser environments.
+This is a purpose built wrapper for the Matrix API and by no neans a general-purpose SDK! It creates top-level abstractions like `project-list` and `project` which are only suitable for ODINv2 replication. It's designed to support both nodejs and browser environments.
 
-__WARNING: As of 14mar23 the implementation is limited to the nodejs runtime >= 18 since it requires at least the experimental implementation of the fetch API!__
+__WARNING: As of 14mar23 the nodejs runtime must be version 18+ since it requires the (currently experimental) implementation of the fetch API!__
 
 ## http-api
 The `http-api` is a very thin layer for the Matrix http (REST-like) api. The only enhancement is the automated renewal of the access token. This API does not have any ODIN domain specific functionality.
