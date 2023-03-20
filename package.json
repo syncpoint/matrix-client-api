@@ -14,6 +14,7 @@
   "author": "thomas.halwax@syncpoint.io",
   "license": "UNLICENSED",
   "dependencies": {
+    "js-base64": "^3.7.5",
     "ky": "^0.33.2",
     "ky-universal": "^0.11.0"
   },
