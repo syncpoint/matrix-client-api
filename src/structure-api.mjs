@@ -1,14 +1,5 @@
 import { roomStateReducer } from './convenience.mjs'
 
-const MAX_BATCH_SIZE = 64
-
-const EVENT_TYPES = {
-  STATE: ['m.room.name', 'm.room.member', 'm.space.child'],
-  MESSAGE: ['m.room.message']
-}
-
-
-
 /**
  * @readonly
  * @enum {string}
@@ -25,7 +16,7 @@ const ROOM_TYPE = {
 
 /**
  * @description Designed for usage in ODINv2.
- * @typedef {Object} MatrixAPI
+ * @typedef {Object} StructureAPI
  */
 class StructureAPI {
   constructor (httpAPI) {
@@ -117,6 +108,9 @@ class StructureAPI {
    */
   async project (globalId) {
     const hierarchy = await this.httpAPI.getRoomHierarchy(globalId)
+
+    const space = hierarchy.rooms.find(room => room.room_type === 'm.space')
+
     const layerRoomIds = hierarchy.rooms
       .filter(room => room.room_type === 'io.syncpoint.odin.layer')
       .map(room => room.room_id)
@@ -134,7 +128,15 @@ class StructureAPI {
       layers[roomId] = room
     }
 
-    return layers
+    const project = {
+      room_id: space.room_id,
+      name: space.name,
+      topic: space.topic,
+      layers
+    }
+    
+
+    return project
   }
 
   /**
@@ -306,16 +308,6 @@ class StructureAPI {
 
   async setTopic (globalId, topic) {
     return this.httpAPI.sendStateEvent(globalId, 'm.room.topic', { topic })
-  }
-
-  /**
-   * 
-   * @param {MatrixRoomId} globalLayerId 
-   * @param {object} message
-   * @description Calls are scheduled 
-   */
-  post (globalLayerId, message) {
-    this.commandAPI.schedule(['sendMessageEvent', globalLayerId, MESSAGE_EVENT_TYPE, message])
   }
 
 }

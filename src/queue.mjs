@@ -1,40 +1,63 @@
 class FIFO {
-  constructor () {
-    this.items = []
+  /*
+    Dequeue will create a promise that enqueue/requeue will resolve.
+    Credits to https://stackoverflow.com/questions/47157428/how-to-implement-a-pseudo-blocking-async-queue-in-js-ts/47157577#47157577
+  */
+  constructor() {
+    this.resolvingFunctions = []
+    this.promises = []
   }
 
-  enqueue (item) {
-    // inserts item at the end of the items array
-    this.items.push(item)
-    if (this.controller) {
-      this.controller.abort()
-      this.controller = undefined
-    }
-    
+  _add() {
+    this.promises.push(new Promise(resolve => {
+      this.resolvingFunctions.push(resolve)
+    }))
+  }
+
+  enqueue(t) {
+    if (!this.resolvingFunctions.length) this._add()
+    // give me the heading resolving function, I'll call (resolve) it with parameter 't'
+
+    const resolve = this.resolvingFunctions.shift()
+    resolve(t)
   }
 
   dequeue() {
-    // removes the first element of the items array 
-    const next = this.items.shift()
-    if (next) { 
-      return Promise.resolve(next)
+    if (!this.promises.length) this._add()
+    return this.promises.shift()
+  }
+
+  requeue(t) {
+    if (!this.promises.length) {
+      this._add()
+    } else {
+      this.promises.unshift(new Promise(resolve => {
+        this.resolvingFunctions.unshift(resolve)
+      }))
     }
-    this.controller = new AbortController()
-    return new Promise((resolve) => {
-      const handler = () => {
-        this.controller.signal.removeEventListener('abort', handler)
-        resolve(this.items.shift())
-      }
-      this.controller.signal.addEventListener('abort', handler)
-    })
+    this.resolvingFunctions.shift()(t)
+  }
+  
+  isEmpty() {
+    return !this.promises.length
   }
 
-  requeue (item) {
-    this.items = this.items.concat([item], this.items)
+  isBlocked() {
+    return !!this.resolvingFunctions.length
   }
 
-  get lenght () {
-    return this.items.length
+  get length() {
+    return this.promises.length - this.resolvingFunctions.length
+  }
+
+  [Symbol.asyncIterator]() {
+    return {
+      next: async () => {
+        const value = await this.dequeue()
+        return { done: false, value}
+      },
+      [Symbol.asyncIterator]() { return this }
+    }
   }
 }
 
