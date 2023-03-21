@@ -35,7 +35,6 @@ ProjectList.prototype.hydrate = async function () {
   Object.entries(myProjects).forEach(([roomId, roomState]) => {
     this.wellKnown.set(roomId, roomState.id)  // upstream (matrix) => downstream (ODIN)
     this.wellKnown.set(roomState.id, roomId)
-    console.log(`hydrated ${roomId} <> ${roomState.id}`)
   })
 }
 
