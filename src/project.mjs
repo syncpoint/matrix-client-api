@@ -39,7 +39,8 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
  * wellKnown mapping between ODIN and Matrix IDs.
  * @param {*} param0 
  * @returns {ProjectStructure}
- */Project.prototype.hydrate = async function ({ projectId, matrixSpaceId }) {
+ */
+Project.prototype.hydrate = async function ({ projectId, matrixSpaceId }) {
   const hierarchy = await this.structureAPI.project(matrixSpaceId)
   if (!hierarchy) return
 
@@ -61,7 +62,6 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
   }
 
   return projectStructure
-  
 }
 
 Project.prototype.shareLayer = async function (layerId, name, description) {
@@ -71,7 +71,8 @@ Project.prototype.shareLayer = async function (layerId, name, description) {
 }
 
 Project.prototype.joinLayer = async function (layerId) {
-  const upstreamId = this.wellKnown.get(layerId)
+  // 
+  const upstreamId = this.wellKnown.get(layerId) || layerId
   await this.structureAPI.join(upstreamId)
 }
 
@@ -96,8 +97,17 @@ Project.prototype.post = async function (layerId, operations) {
 Project.prototype.start = async function (streamToken, handler = {}) {
 
   const filterProvider = () => {
-    const EVENT_TYPES = [   
+
+    /*
+      Within a project we are only interested in
+        * a new layer has been added to the project >> m.space.child
+        * an existing layer has been renamed >> m.room.name
+        * a payload message has been posted in the layer >> io.syncpoint.odin.operation  
+    */
+    const EVENT_TYPES = [
+      'm.room.create',
       'm.room.name',
+      'm.space.child',
       ODINv2_MESSAGE_TYPE
     ]
 
@@ -109,7 +119,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         timeline: { 
           lazy_load_members: true, // improve performance
           limit: 1000, 
-          types: EVENT_TYPES, 
+          // types: EVENT_TYPES, 
           not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
           rooms: Array.from(this.wellKnown.keys()).filter(key => key.startsWith('!'))
         },
@@ -122,9 +132,31 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     return filter
   }
 
+  const isChildAdded = events => events.some(event => event.type === 'm.space.child')
+
+
+
+
   this.stream = this.timelineAPI.stream(streamToken, filterProvider)
   for await (const chunk of this.stream) {
+
     console.dir(chunk, { depth: 5 })
+    if (Object.keys(chunk.events).length === 0) continue
+
+    /* 
+      If a chunk for a room contains a m.space.child event
+      we need to request the details for each child.
+      m.space.child can only be received for the project (space) itself
+    */
+
+    Object.entries(chunk.events).forEach(async ([roomId, content]) => {
+      if (isChildAdded(content)) {
+        const childEvent = content.find(event => event.type === 'm.space.child' )
+        console.dir(childEvent.state_key)
+        const p = await this.structureAPI.project(roomId)
+        console.dir(p)
+      }
+    })
   }
 
 }
