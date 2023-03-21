@@ -110,31 +110,57 @@ class StructureAPI {
     const hierarchy = await this.httpAPI.getRoomHierarchy(globalId)
 
     const space = hierarchy.rooms.find(room => room.room_type === 'm.space')
-
     const layerRoomIds = hierarchy.rooms
       .filter(room => room.room_type === 'io.syncpoint.odin.layer')
       .map(room => room.room_id)
+
     const filter = {
+      account_data: {
+        not_types:  [ '*' ]
+      },
       room: {
-        timeline: { not_types: [ '*' ] },
-        rooms: layerRoomIds
+        timeline: {
+          lazy_load_members: true,  // improve performance
+          not_types: [ '*' ]        // don't care about timeline
+        },
+        rooms: layerRoomIds,
+        ephemeral: {
+          not_types: [ '*' ]
+        }
       }
     }
     const state = await this.httpAPI.sync(undefined, filter, 0)
-    const layers = {}
-
+    
+    const layers = {}    
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
+      if (!layerRoomIds.includes(roomId)) continue
       const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
       layers[roomId] = room
     }
+
+    /*
+      We have set up children of a space to be discoverable without an explicit invitation (see join_rules for the children).
+      Thus, these children are NOT LISTED in the 'invite' object of 'state.rooms', but they are part of the hierarchy API call.
+      So every layer that is listed in the hierarchy but is not part of the layers joined must be a candidate that may be joined.
+    */
+
+    const candidateIds = layerRoomIds.filter(roomId => (layers[roomId] === undefined))
+    const candidates = hierarchy.rooms
+                        .filter(room => candidateIds.includes(room.room_id))
+                        .map(room => ({
+                          id: room.room_id,
+                          name: room.name,
+                          topic: room.topic
+                        }))
+    
 
     const project = {
       room_id: space.room_id,
       name: space.name,
       topic: space.topic,
-      layers
-    }
-    
+      layers,
+      candidates
+    }    
 
     return project
   }
@@ -188,8 +214,6 @@ class StructureAPI {
     await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
     })
-    
-    // await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
 
     return {
       localId,
@@ -246,7 +270,6 @@ class StructureAPI {
     await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
     })
-    // await this.httpAPI.sendStateEvent(globalId, 'io.syncpoint.odin.id', { id: localId }, '')
 
     return {
       localId,
