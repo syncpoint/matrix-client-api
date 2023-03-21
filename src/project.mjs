@@ -88,9 +88,9 @@ Project.prototype.post = async function (layerId, operations) {
   // TODO: operations need to get splitted if the max. size of approximately 60k per message is reached
 
   const encode = operations => `data:application/json;base64,${Base64.encode(JSON.stringify(operations))}`
-  const message = encode(operations)
+  const content = encode(operations)
   const upstreamId = this.wellKnown.get(layerId)
-  this.commandAPI.schedule(['sendMessageEvent', upstreamId, ODINv2_MESSAGE_TYPE, { message }])
+  this.commandAPI.schedule(['sendMessageEvent', upstreamId, ODINv2_MESSAGE_TYPE, { content }])
 }
 
 Project.prototype.start = async function (streamToken, handler = {}) {
