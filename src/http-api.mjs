@@ -14,7 +14,7 @@ const Direction = {
   backward: 'b',
   forward: 'f'
 }
-function HttpAPI (credentials, handler = { tokenRefreshed: () => {} }) {
+function HttpAPI (credentials) {
 
   this.credentials = {
     user_id: credentials.user_id,
@@ -23,7 +23,7 @@ function HttpAPI (credentials, handler = { tokenRefreshed: () => {} }) {
     access_token: credentials.access_token
   }
 
-  this.handler = handler
+  this.handler = { tokenRefreshed: () => {} }
  
   const clientOptions = {
     prefixUrl: new URL('/_matrix/client', credentials.home_server_url),
@@ -85,6 +85,10 @@ HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
         refresh_token: refreshToken
       }
     }).json()
+}
+
+HttpAPI.prototype.tokenRefreshed = handler => {
+  this.handler.tokenRefreshed = handler
 }
 
 
