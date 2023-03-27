@@ -19,6 +19,7 @@ function HttpAPI (credentials) {
   this.credentials = {
     user_id: credentials.user_id,
     home_server: credentials.home_server,
+    home_server_url: credentials.home_server_url,
     refresh_token: credentials.refresh_token,
     access_token: credentials.access_token
   }
