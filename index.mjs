@@ -5,27 +5,38 @@ import { CommandAPI } from './src/command-api.mjs'
 import { ProjectList } from './src/project-list.mjs'
 import { Project } from './src/project.mjs'
 
-const MatrixClient = (loginData) => ({
+const MatrixClient = (loginData, mostRecentCredentials) => ({
 
   projectList: async () => {
-    const credentials = await HttpAPI.loginWithPassword(loginData)
+    
+    const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
     const httpAPI = new HttpAPI(credentials)
     const projectListParames = {
       structureAPI: new StructureAPI(httpAPI),
       timelineAPI: new TimelineAPI(httpAPI)
     }
-    return new ProjectList(projectListParames)
+    const projectList = new ProjectList(projectListParames)
+    projectList.logout = async () => {
+      return httpAPI.logout()
+    }
+    projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+    return projectList
   },
 
   project: async () => {
-    const credentials = await HttpAPI.loginWithPassword(loginData)
+    const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
     const httpAPI = new HttpAPI(credentials)
     const projectParams = {
       structureAPI: new StructureAPI(httpAPI),
       timelineAPI: new TimelineAPI(httpAPI),
       commandAPI: new CommandAPI(httpAPI)
     }
-    return new Project(projectParams)
+    const project = new Project(projectParams)
+    project.logout = async () => {
+      return httpAPI.logout()
+    }
+    projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+    return project
   }
 })
 
