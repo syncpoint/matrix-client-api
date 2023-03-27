@@ -14,7 +14,7 @@ const Direction = {
   backward: 'b',
   forward: 'f'
 }
-function HttpAPI (credentials) {
+function HttpAPI (credentials, handler = { tokenRefreshed: () => {} }) {
 
   this.credentials = {
     user_id: credentials.user_id,
@@ -22,6 +22,8 @@ function HttpAPI (credentials) {
     refresh_token: credentials.refresh_token,
     access_token: credentials.access_token
   }
+
+  this.handler = handler
  
   const clientOptions = {
     prefixUrl: new URL('/_matrix/client', credentials.home_server_url),
@@ -57,6 +59,7 @@ function HttpAPI (credentials) {
               this.credentials.refresh_token = tokens.refresh_token
               /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
               this.credentials.access_token = tokens.access_token
+              if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(tokens) // notify the outside world about the new tokens
             } catch (error) {
               console.error(error)
             }
@@ -65,10 +68,6 @@ function HttpAPI (credentials) {
           }
 
           throw error
-          
-
-          
-        
         }
       ]
     },
@@ -114,12 +113,7 @@ HttpAPI.login = async function (homeServerUrl, options) {
     json: body,
     retry: {
       limit: 3
-    }/* ,
-    timeout: {
-      connect: 2500,
-      send: 2500,
-      response: 10000
-    } */
+    }
   }).json()
 
   loginResult.home_server_url = homeServerUrl
