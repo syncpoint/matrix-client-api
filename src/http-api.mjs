@@ -88,7 +88,7 @@ HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
     }).json()
 }
 
-HttpAPI.prototype.tokenRefreshed = handler => {
+HttpAPI.prototype.tokenRefreshed = function (handler) {
   this.handler.tokenRefreshed = handler
 }
 
