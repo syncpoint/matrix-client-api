@@ -35,7 +35,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
 
   // get the complete timeline for all rooms that we have already joined
   const catchUp = await Promise.all(
-    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, since, prev_batch, filter?.room?.timeline))
+    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, filter?.room?.timeline))
   )
   catchUp.forEach(result => {
     events[result.roomId] = [...events[result.roomId], ...result.events]
@@ -116,7 +116,7 @@ TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = 
   while (!signal.aborted) {
     try {
       await chill(retryCounter)
-      const filter = filterProvider()
+      const filter = filterProvider ? filterProvider() : undefined
       const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
       retryCounter = 0
       if (streamToken !== syncResult.next_batch) {
