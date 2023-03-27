@@ -59,7 +59,7 @@ function HttpAPI (credentials) {
               this.credentials.refresh_token = tokens.refresh_token
               /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
               this.credentials.access_token = tokens.access_token
-              if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(tokens) // notify the outside world about the new tokens
+              if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(this.credentials) // notify the outside world about the new tokens
             } catch (error) {
               console.error(error)
             }
