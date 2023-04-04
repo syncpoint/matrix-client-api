@@ -35,7 +35,7 @@ const MatrixClient = (loginData) => ({
     project.logout = async () => {
       return httpAPI.logout()
     }
-    projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+    project.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
     return project
   }
 })
