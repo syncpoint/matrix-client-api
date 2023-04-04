@@ -40,12 +40,12 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
  * @param {*} param0 
  * @returns {ProjectStructure}
  */
-Project.prototype.hydrate = async function ({ projectId, matrixSpaceId }) {
-  const hierarchy = await this.structureAPI.project(matrixSpaceId)
+Project.prototype.hydrate = async function ({ projectId, matrixSpaceId: upstreamId }) {
+  const hierarchy = await this.structureAPI.project(upstreamId)
   if (!hierarchy) return
 
   this.projectId = projectId
-  this.wellKnown.remember(projectId, matrixSpaceId)
+  this.wellKnown.remember(projectId, upstreamId)
   Object.values(hierarchy.layers).forEach(layer => {
     this.wellKnown.remember(layer.room_id, layer.id)
   })

@@ -43,7 +43,8 @@ ProjectList.prototype.share = async function (projectId, name, description) {
   this.wellKnown.set(result.globalId, result.localId)
   this.wellKnown.set(result.localId, result.globalId)
   return {
-    projectId
+    id: projectId,
+    upstreamId: result.globalId
   }
 }
 
@@ -68,7 +69,8 @@ ProjectList.prototype.join = async function (projectId) {
   const upstreamId = this.wellKnown.get(projectId)
   await this.structureAPI.join(upstreamId)
   return {
-    id: projectId
+    id: projectId,
+    upstreamId
   }
 }
 
