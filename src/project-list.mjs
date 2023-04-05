@@ -1,14 +1,7 @@
-import { roomStateReducer } from "./convenience.mjs"
+import { roomStateReducer, wrap } from "./convenience.mjs"
 
 
-const wrap = handler => {
-  const proxyHandler = {
-    get (target, property) {
-      return (property in target && typeof target[property] === 'function') ? target[property] : () => console.error(`HANDLER does not handle ${property}`)
-    }
-  }
-  return new Proxy(handler, proxyHandler)
-}
+
 
 const domainMapper = matrixRoomState => {
   const project = {...matrixRoomState}

@@ -60,9 +60,19 @@ const roomStateReducer = (acc, event) => {
   return acc
 }
 
+const wrap = handler => {
+  const proxyHandler = {
+    get (target, property) {
+      return (property in target && typeof target[property] === 'function') ? target[property] : () => console.error(`HANDLER does not handle ${property}`)
+    }
+  }
+  return new Proxy(handler, proxyHandler)
+}
+
 export {
   effectiveFilter,
   invitedSpaces,
   timelineQueryParams,
-  roomStateReducer
+  roomStateReducer,
+  wrap
 }

@@ -1,5 +1,6 @@
 
 import { Base64 } from 'js-base64'
+import { wrap } from './convenience.mjs'
 
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
 
@@ -119,7 +120,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         timeline: { 
           lazy_load_members: true, // improve performance
           limit: 1000, 
-          // types: EVENT_TYPES, 
+          types: EVENT_TYPES, 
           not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
           rooms: Array.from(this.wellKnown.keys()).filter(key => key.startsWith('!'))
         },
@@ -136,11 +137,21 @@ Project.prototype.start = async function (streamToken, handler = {}) {
 
 
 
-
+  const streamHandler = wrap(handler)
   this.stream = this.timelineAPI.stream(streamToken, filterProvider)
   for await (const chunk of this.stream) {
-
+    
+    // TODO. remove after debugging is done :-)
     console.dir(chunk, { depth: 5 })
+
+    if (chunk instanceof Error) {
+      await streamHandler.error(chunk)
+      continue
+    }
+
+    // just store the next batch value no matter if we will process the stream any further 
+    await streamHandler.streamToken(chunk.next_batch)
+
     if (Object.keys(chunk.events).length === 0) continue
 
     /* 
