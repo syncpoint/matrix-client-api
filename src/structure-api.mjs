@@ -319,6 +319,10 @@ class StructureAPI {
     }
   }
 
+  async getLayer (globalId) {
+    return this.httpAPI.getRoom(globalId)
+  }
+
   /**
    * 
    * @param {MatrixRoomId} globalId - The [matrix] roomId of the room to rename
