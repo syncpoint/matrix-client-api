@@ -1,7 +1,7 @@
 // import { got } from 'got'
 import ky, { HTTPError } from 'ky-universal'
 import { randomUUID } from 'crypto'
-import { effectiveFilter } from './convenience.mjs'
+import { effectiveFilter, roomStateReducer } from './convenience.mjs'
 
 const POLL_TIMEOUT = 30000
 const RETRY_LIMIT = 2
@@ -143,7 +143,7 @@ HttpAPI.prototype.getRoomId = async function (alias) {
 }
 
 HttpAPI.prototype.getRoom = async function (roomId) {
-  this.state = await this.getState(roomId)
+  const state = await this.getState(roomId)
   const room = state.reduce(roomStateReducer, { room_id: roomId })
   return room
 }
