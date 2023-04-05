@@ -19,6 +19,9 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
     this.set(upstream, downstream)
     this.set(downstream, upstream)
   }
+  this.wellKnown.forget = function (key) {
+    this.set.delete(key)
+  }
   this.commandAPI.run()
 }
 
@@ -59,6 +62,11 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
       id: layer.id,
       name: layer.name,
       topic: layer.topic
+    })),
+    invitations: hierarchy.candidates.map(candidate => ({
+      id: Base64.encode(candidate.id),
+      name: candidate.name,
+      topic: candidate.topic
     }))
   }
 
@@ -72,9 +80,17 @@ Project.prototype.shareLayer = async function (layerId, name, description) {
 }
 
 Project.prototype.joinLayer = async function (layerId) {
-  // 
-  const upstreamId = this.wellKnown.get(layerId) || layerId
+  
+  const upstreamId = this.wellKnown.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
+  
   await this.structureAPI.join(upstreamId)
+  /*
+    It takes a while to propagate the "join" information. 
+    Maybe it's better to handle this in the timeline/stream api??
+  */
+  const room = await this.structureAPI.getLayer(upstreamId)  
+  this.wellKnown.remember(room.id, room.room_id)
+  return room
 }
 
 Project.prototype.leaveLayer = async function (layerId) {
