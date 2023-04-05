@@ -137,7 +137,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           lazy_load_members: true, // improve performance
           limit: 1000, 
           types: EVENT_TYPES, 
-          not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
+          // not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
           rooms: Array.from(this.wellKnown.keys()).filter(key => key.startsWith('!'))
         },
         ephemeral: {
@@ -179,11 +179,22 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     Object.entries(chunk.events).forEach(async ([roomId, content]) => {
       if (isChildAdded(content)) {
         const childEvent = content.find(event => event.type === 'm.space.child' )
-        console.dir(childEvent.state_key)
-        const p = await this.structureAPI.project(roomId)
-        console.dir(p)
-      }
+        const project = await this.structureAPI.project(roomId)
+        const childRoom = project.candidates.find(room => room.id === childEvent.state_key)
+        if (!childRoom) {
+          console.warn('Received m.space.child event but did not find new child room')
+          return
+        }
+        
+        await streamHandler.invited({
+          id: Base64.encode(childRoom.id),
+          name: childRoom.name,
+          topic: childRoom.topic
+        })
+      }      
     })
+  
+
   }
 
 }
