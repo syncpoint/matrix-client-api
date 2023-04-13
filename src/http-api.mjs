@@ -1,5 +1,5 @@
 // import { got } from 'got'
-import ky, { HTTPError } from 'ky-universal'
+import ky, { HTTPError } from 'ky'
 import { randomUUID } from 'crypto'
 import { effectiveFilter, roomStateReducer } from './convenience.mjs'
 
@@ -47,25 +47,21 @@ function HttpAPI (credentials) {
           // instanceof HttpError vs TypeError?
           if (error instanceof HTTPError) {
 
-            if (error.response.status !== 401) return
-
-            const body = await error.response.json()
-            if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
-              console.error('MATRIX server does not like us anymore :-(', body.error)
-              throw new Error(`${body.errcode}: ${body.error}`)
-            }
-
-            try { 
+            if (error.response.status === 403) {
+              throw error
+            } else if (error.response.status === 401) {
+              const body = await error.response.json()
+              if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
+                console.error('MATRIX server does not like us anymore :-(', body.error)
+                throw new Error(`${body.errcode}: ${body.error}`)
+              }
+              
               const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
               this.credentials.refresh_token = tokens.refresh_token
               /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
               this.credentials.access_token = tokens.access_token
               if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(this.credentials) // notify the outside world about the new tokens
-            } catch (error) {
-              console.error(error)
             }
-
-            return
           }
 
           throw error
