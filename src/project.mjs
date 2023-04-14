@@ -3,6 +3,8 @@ import { Base64 } from 'js-base64'
 import { wrap } from './convenience.mjs'
 
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
+const M_SPACE_CHILD = 'm.space.child'
+const M_ROOM_NAME = 'm.room.name'
 
 /**
  * 
@@ -105,7 +107,7 @@ Project.prototype.setLayerName = async function (layerId, name) {
 Project.prototype.post = async function (layerId, operations) {
   // TODO: operations need to get splitted if the max. size of approximately 60k per message is reached
 
-  const encode = operations => `data:application/json;base64,${Base64.encode(JSON.stringify(operations))}`
+  const encode = operations => Base64.encode(JSON.stringify(operations))
   const content = encode(operations)
   const upstreamId = this.wellKnown.get(layerId)
   this.commandAPI.schedule(['sendMessageEvent', upstreamId, ODINv2_MESSAGE_TYPE, { content }])
@@ -122,9 +124,8 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         * a payload message has been posted in the layer >> io.syncpoint.odin.operation  
     */
     const EVENT_TYPES = [
-      'm.room.create',
-      'm.room.name',
-      'm.space.child',
+      M_ROOM_NAME,
+      M_SPACE_CHILD,
       ODINv2_MESSAGE_TYPE
     ]
 
@@ -137,7 +138,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           lazy_load_members: true, // improve performance
           limit: 1000, 
           types: EVENT_TYPES, 
-          // not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
+          not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
           rooms: Array.from(this.wellKnown.keys()).filter(key => key.startsWith('!'))
         },
         ephemeral: {
@@ -149,36 +150,37 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     return filter
   }
 
-  const isChildAdded = events => events.some(event => event.type === 'm.space.child')
-
+  const isChildAdded = events => events.some(event => event.type === M_SPACE_CHILD)
+  const isLayerRenamed = events => events.some(event => event.type === M_ROOM_NAME)
+  const isODINOperation = events => events.some(event => event.type === ODINv2_MESSAGE_TYPE)
 
 
   const streamHandler = wrap(handler)
   this.stream = this.timelineAPI.stream(streamToken, filterProvider)
   for await (const chunk of this.stream) {
-    
-    // TODO. remove after debugging is done :-)
-    console.dir(chunk, { depth: 5 })
-
+ 
     if (chunk instanceof Error) {
       await streamHandler.error(chunk)
       continue
     }
 
-    // just store the next batch value no matter if we will process the stream any further 
+    /* 
+      Just store the next batch value no matter if we will process the stream any further.
+      If any of the following functions runs into an error the erroneous chunk
+      will get skipped during the next streamToken updated.
+    */
     await streamHandler.streamToken(chunk.next_batch)
 
     if (Object.keys(chunk.events).length === 0) continue
 
-    /* 
-      If a chunk for a room contains a m.space.child event
-      we need to request the details for each child.
-      m.space.child can only be received for the project (space) itself
-    */
-
     Object.entries(chunk.events).forEach(async ([roomId, content]) => {
       if (isChildAdded(content)) {
-        const childEvent = content.find(event => event.type === 'm.space.child' )
+        /* 
+          If a chunk for a room contains a m.space.child event
+          we need to request the details for each child.
+          m.space.child can only be received for the project (space) itself
+        */
+        const childEvent = content.find(event => event.type === M_SPACE_CHILD )
         const project = await this.structureAPI.project(roomId)
         const childRoom = project.candidates.find(room => room.id === childEvent.state_key)
         if (!childRoom) {
@@ -191,10 +193,28 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           name: childRoom.name,
           topic: childRoom.topic
         })
-      }      
-    })
+      } 
+      
+      if (isLayerRenamed(content)) {
+        console.dir(content)
+        const renamed = content
+          .filter(event => event.type === M_ROOM_NAME)
+          .map(event => ({
+            id: this.wellKnown.get(roomId),
+            name: event.content.name
+          }))
+        
+        await streamHandler.renamed(renamed)  
+      } 
+      
+      if (isODINOperation(content)) {
+        const operations = content
+          .filter(event => event.type === ODINv2_MESSAGE_TYPE)
+          .map(event => JSON.parse(Base64.decode(event.content.content)))
   
-
+        await streamHandler.received(operations)
+      }     
+    })
   }
 
 }
