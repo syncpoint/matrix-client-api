@@ -214,6 +214,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         const operations = content
           .filter(event => event.type === ODINv2_MESSAGE_TYPE)
           .map(event => JSON.parse(Base64.decode(event.content.content)))
+          .flat()
   
         await streamHandler.received(operations)
       }     
