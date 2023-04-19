@@ -22,7 +22,7 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
     this.set(downstream, upstream)
   }
   this.wellKnown.forget = function (key) {
-    this.set.delete(key)
+    this.delete(key)
   }
   this.commandAPI.run()
 }
