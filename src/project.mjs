@@ -92,10 +92,6 @@ Project.prototype.joinLayer = async function (layerId) {
   const upstreamId = this.wellKnown.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
   
   await this.structureAPI.join(upstreamId)
-  /*
-    It takes a while to propagate the "join" information. 
-    Maybe it's better to handle this in the timeline/stream api??
-  */
   const room = await this.structureAPI.getLayer(upstreamId)  
   this.wellKnown.remember(room.id, room.room_id)
   return room
@@ -111,6 +107,24 @@ Project.prototype.leaveLayer = async function (layerId) {
 Project.prototype.setLayerName = async function (layerId, name) {
   const upstreamId = this.wellKnown.get(layerId)
   return this.structureAPI.setName(upstreamId, name)
+}
+
+Project.prototype.content = async function (layerId) {
+  const filter = { 
+      lazy_load_members: true, // improve performance
+      limit: 1000, 
+      types: [ODINv2_MESSAGE_TYPE],
+      not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
+    }
+
+  const upstreamId = this.wellKnown.get(layerId)
+  const content = await this.timelineAPI.content(upstreamId, filter)
+  const operations = content.events
+    .map(event => 
+      JSON.parse(Base64.decode(event.content.content))
+    )
+    .flat()
+  return operations
 }
 
 Project.prototype.post = async function (layerId, operations) {
