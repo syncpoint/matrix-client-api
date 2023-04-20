@@ -45,7 +45,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', filter?.room?.timeline))
   )
   /* 
-    Since we walk backwards we need to append the events at the head of the array
+    Since we walk backwards ('b') in time we need to append the events at the head of the array
     in order to maintain the chronological order (oldest first).
   */
   catchUp.forEach(result => {
