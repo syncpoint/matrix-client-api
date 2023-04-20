@@ -240,6 +240,9 @@ HttpAPI.prototype.getMessages = async function (roomId, options) {
   if (searchParams.filter) {
     searchParams.filter = effectiveFilter(searchParams.filter)
   }
+  Object.entries(options).forEach(([key, value]) => {
+    if (!value) delete searchParams[key]
+  })
   return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams }).json()
 }
 

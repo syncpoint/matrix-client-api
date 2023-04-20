@@ -8,6 +8,10 @@ TimelineAPI.prototype.credentials = function () {
   return this.httpApi.credentials
 }
 
+TimelineAPI.prototype.content = async function (roomId, filter) {
+  return this.catchUp(roomId, null, null, 'f', filter)
+}
+
 TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) {
   /*
     We want the complete timeline for all rooms that we have already joined. Thus we get the most recent
@@ -59,12 +63,13 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   }
 }
 
-TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, filter = {}) {
+TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, dir = 'b', filter = {}) {
 
   const queryOptions = { 
     filter,
-    dir: 'b', // move backwards on the timeline,
-    to: lastKnownStreamToken
+    dir,
+    to: lastKnownStreamToken,
+    limit: 1000
   }
 
   // Properties "from" and "limited" will be modified during catchUp-phase
