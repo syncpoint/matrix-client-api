@@ -8,9 +8,12 @@ TimelineAPI.prototype.credentials = function () {
   return this.httpApi.credentials
 }
 
-TimelineAPI.prototype.content = async function (roomId, filter) {
+TimelineAPI.prototype.content = async function (roomId, filter, from) {
+  console.dir(filter, { depth: 5 })
+
   return this.catchUp(roomId, null, null, 'f', filter)
 }
+
 
 TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) {
   /*
@@ -39,15 +42,14 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
 
   // get the complete timeline for all rooms that we have already joined
   const catchUp = await Promise.all(
-    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, filter?.room?.timeline))
+    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', filter?.room?.timeline))
   )
+  /* 
+    Since we walk backwards we need to append the events at the head of the array
+    in order to maintain the chronological order (oldest first).
+  */
   catchUp.forEach(result => {
     events[result.roomId] = [...events[result.roomId], ...result.events]
-  })
-
-  // revert order of events to oldest first
-  Object.keys(events).forEach(roomId => {
-    events[roomId].reverse()
   })
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.invite || {})) {
