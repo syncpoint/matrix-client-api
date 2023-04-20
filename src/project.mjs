@@ -6,6 +6,12 @@ const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
 const M_SPACE_CHILD = 'm.space.child'
 const M_ROOM_NAME = 'm.room.name'
 
+/*  The max. event size for a matrix event is 64k
+    see https://spec.matrix.org/v1.6/client-server-api/#size-limits
+    We limit our own content to chunks of max 56k
+*/
+const MAX_MESSAGE_SIZE = 56 * 1024
+
 /**
  * 
  * @param {Object} apis
@@ -108,12 +114,28 @@ Project.prototype.setLayerName = async function (layerId, name) {
 }
 
 Project.prototype.post = async function (layerId, operations) {
-  // TODO: operations need to get splitted if the max. size of approximately 60k per message is reached
+
+  const split = ops => {
+    const content = encode(ops)
+    if (content.length <= MAX_MESSAGE_SIZE) return ops
+    const half = Math.floor(ops.length / 2)
+    const left = split(ops.slice(0, half))
+    const right = split(ops.slice(half))
+    return [left, right]
+  }
+  
+  const collect = splittedOperations => {
+    if (Array.isArray(splittedOperations[0]) === false) return [splittedOperations]
+    return [...collect(splittedOperations[0]), ...collect(splittedOperations[1])]
+  }
 
   const encode = operations => Base64.encode(JSON.stringify(operations))
-  const content = encode(operations)
+
+  const chunks = split(operations)
+  const parts = collect(chunks)
+
   const upstreamId = this.wellKnown.get(layerId)
-  this.commandAPI.schedule(['sendMessageEvent', upstreamId, ODINv2_MESSAGE_TYPE, { content }])
+  parts.forEach(part => this.commandAPI.schedule(['sendMessageEvent', upstreamId, ODINv2_MESSAGE_TYPE, { content: encode(part) }]))
 }
 
 Project.prototype.start = async function (streamToken, handler = {}) {
@@ -199,7 +221,6 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       } 
       
       if (isLayerRenamed(content)) {
-        console.dir(content)
         const renamed = content
           .filter(event => event.type === M_ROOM_NAME)
           .map(event => ({
