@@ -30,7 +30,6 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
   this.wellKnown.forget = function (key) {
     this.delete(key)
   }
-  this.commandAPI.run()
 }
 
 /**
@@ -53,15 +52,18 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
  * @returns {ProjectStructure}
  */
 Project.prototype.hydrate = async function ({ id, upstreamId }) {
+  
   const hierarchy = await this.structureAPI.project(upstreamId)
   if (!hierarchy) return
+
+  this.commandAPI.run()
 
   this.projectId = id
   this.wellKnown.remember(id, upstreamId)
   Object.values(hierarchy.layers).forEach(layer => {
     this.wellKnown.remember(layer.room_id, layer.id)
   })
-  
+
   const projectStructure = {
     id,
     name: hierarchy.name,
@@ -77,7 +79,7 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
       topic: candidate.topic
     }))
   }
-
+  
   return projectStructure
 }
 
