@@ -69,10 +69,24 @@ const wrap = handler => {
   return new Proxy(handler, proxyHandler)
 }
 
+/**
+   * @param {Number} retryCounter 
+   * @returns A promise that resolves after a calculated time depending on the retryCounter using an exponential back-off algorithm. The max. delay is 30s.
+   */
+const chill = retryCounter => new Promise((resolve) => {
+  const BACKOFF_FACTOR = 0.5
+  const BACKOFF_LIMIT = 30_000
+  const delay = Math.min(BACKOFF_LIMIT, (retryCounter === 0 ? 0 : BACKOFF_FACTOR * (2 ** (retryCounter)) * 1000))
+  setTimeout(() => {
+    resolve()
+  }, delay);
+})
+
 export {
   effectiveFilter,
   invitedSpaces,
   timelineQueryParams,
   roomStateReducer,
-  wrap
+  wrap,
+  chill
 }

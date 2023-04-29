@@ -1,3 +1,5 @@
+import { chill } from './convenience.mjs'
+
 const DEFAULT_POLL_TIMEOUT = 30000
 
 const TimelineAPI = function (httpApi) {
@@ -104,18 +106,7 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 
 TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = (new AbortController()).signal) {
   
-  /**
-   * @param {Number} retryCounter 
-   * @returns A promise that resolves after a calculated time depending on the retryCounter using an exponential back-off algorithm. The max. delay is 30s.
-   */
-  const chill = retryCounter => new Promise((resolve) => {
-    const BACKOFF_FACTOR = 0.5
-    const BACKOFF_LIMIT = 30_000
-    const delay = Math.min(BACKOFF_LIMIT, (retryCounter === 0 ? 0 : BACKOFF_FACTOR * (2 ** (retryCounter)) * 1000))
-    setTimeout(() => {
-      resolve()
-    }, delay);
-  })
+  
 
   let streamToken = since
   let retryCounter = 0
