@@ -4,6 +4,27 @@ import { TimelineAPI } from './src/timeline-api.mjs'
 import { CommandAPI } from './src/command-api.mjs'
 import { ProjectList } from './src/project-list.mjs'
 import { Project } from './src/project.mjs'
+import { discover } from './src/discover-api.mjs'
+import { chill } from './src/convenience.mjs'
+
+/*
+  connect() resolves if the home_server can be connected. It does
+  not fail but tries to connect endlessly
+*/
+const connect = (credentials) => async () => {
+  const MAX_CHILL_FACTOR = 64
+  let chillFactor = 0
+  let connected = false
+  while (!connected) {
+    await chill(chillFactor)
+    try {
+      await discover(credentials)
+      connected = true
+    } catch (error) {
+      if (chillFactor < MAX_CHILL_FACTOR) chillFactor++
+    }
+  } 
+}
 
 const MatrixClient = (loginData) => ({
 
@@ -16,6 +37,7 @@ const MatrixClient = (loginData) => ({
       timelineAPI: new TimelineAPI(httpAPI)
     }
     const projectList = new ProjectList(projectListParames)
+    projectList.connect = connect(credentials)
     projectList.logout = async () => {
       return httpAPI.logout()
     }
@@ -32,6 +54,7 @@ const MatrixClient = (loginData) => ({
       commandAPI: new CommandAPI(httpAPI)
     }
     const project = new Project(projectParams)
+    project.connect = connect(credentials)
     project.logout = async () => {
       return httpAPI.logout()
     }
