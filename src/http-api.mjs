@@ -72,24 +72,13 @@ function HttpAPI (credentials) {
     timeout: 1.1 * POLL_TIMEOUT * RETRY_LIMIT
   }
 
-  this.client = ky.extend(clientOptions)
+  this.client = ky.create(clientOptions)
 
 }
 
-
-HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
-    return this.client.post('v3/refresh', { // v1 vs v3 !!
-      json: {
-        refresh_token: refreshToken
-      }
-    }).json()
-}
-
-HttpAPI.prototype.tokenRefreshed = function (handler) {
-  this.handler.tokenRefreshed = handler
-}
-
-
+/*
+  static functions
+*/
 HttpAPI.loginWithPassword = async function ({ homeServerUrl, userId, password, deviceId }) {
   const options = {
     type: 'm.login.password',
@@ -120,6 +109,42 @@ HttpAPI.login = async function (homeServerUrl, options) {
 
   loginResult.home_server_url = homeServerUrl
   return loginResult
+}
+
+HttpAPI.getWellKnownClientInfo = async function (homeServerUrl) {
+  return ky.get('.well-known/matrix/client', {
+    prefixUrl: homeServerUrl,
+    retry: {
+      limit: 1
+    },
+    throwHttpErrors: false
+  })
+}
+
+HttpAPI.getWellKnownServerInfo = async function (homeServerUrl) {
+  return ky.get('.well-known/matrix/server', {
+    prefixUrl: homeServerUrl,
+    retry: {
+      limit: 1
+    },
+    throwHttpErrors: false
+  })
+}
+
+/*
+  Instance functions
+*/
+
+HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
+  return this.client.post('v3/refresh', { // v1 vs v3 !!
+    json: {
+      refresh_token: refreshToken
+    }
+  }).json()
+}
+
+HttpAPI.prototype.tokenRefreshed = function (handler) {
+this.handler.tokenRefreshed = handler
 }
 
 HttpAPI.prototype.logout = async function () {
