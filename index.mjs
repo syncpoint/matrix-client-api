@@ -28,6 +28,8 @@ const connect = (credentials) => async () => {
 
 const MatrixClient = (loginData) => ({
 
+  connect: connect(loginData),
+
   projectList: async mostRecentCredentials => {
     
     const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
@@ -37,7 +39,6 @@ const MatrixClient = (loginData) => ({
       timelineAPI: new TimelineAPI(httpAPI)
     }
     const projectList = new ProjectList(projectListParames)
-    projectList.connect = connect(credentials)
     projectList.logout = async () => {
       return httpAPI.logout()
     }
@@ -54,7 +55,6 @@ const MatrixClient = (loginData) => ({
       commandAPI: new CommandAPI(httpAPI)
     }
     const project = new Project(projectParams)
-    project.connect = connect(credentials)
     project.logout = async () => {
       return httpAPI.logout()
     }

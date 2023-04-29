@@ -79,18 +79,18 @@ function HttpAPI (credentials) {
 /*
   static functions
 */
-HttpAPI.loginWithPassword = async function ({ homeServerUrl, userId, password, deviceId }) {
+HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password, device_id }) {
   const options = {
     type: 'm.login.password',
     identifier: {
       type: 'm.id.user',
-      user: userId
+      user: user_id
     },
     password,
-    device_id: deviceId
+    device_id
   }
 
-  return this.login(homeServerUrl, options)
+  return this.login(home_server_url, options)
 }
 
 HttpAPI.login = async function (homeServerUrl, options) {
