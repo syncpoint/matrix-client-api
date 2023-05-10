@@ -5,6 +5,7 @@ import { roomStateReducer, wrap } from "./convenience.mjs"
 
 const domainMapper = matrixRoomState => {
   const project = {...matrixRoomState}
+  project.upstreamId = matrixRoomState.room_id
   delete project.room_id
   delete project.type
   delete project.children
