@@ -79,7 +79,7 @@ function HttpAPI (credentials) {
 /*
   static functions
 */
-HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password, device_id }) {
+HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password, device_id }, refreshTokenSupported = true) {
   const options = {
     type: 'm.login.password',
     identifier: {
@@ -87,21 +87,18 @@ HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password
       user: user_id
     },
     password,
-    device_id
+    device_id,
+    refresh_token: refreshTokenSupported
   }
 
   return this.login(home_server_url, options)
 }
 
 HttpAPI.login = async function (homeServerUrl, options) {
-  const defaults = {
-    refresh_token: true
-  }     
-  const body = {...defaults, ...options}
 
   const loginResult = await ky.post('v3/login', {
     prefixUrl: new URL('/_matrix/client', homeServerUrl),
-    json: body,
+    json: options,
     retry: {
       limit: 3
     }
