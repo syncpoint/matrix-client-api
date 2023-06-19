@@ -141,12 +141,16 @@ HttpAPI.prototype.refreshAccessToken = async function (refreshToken) {
 }
 
 HttpAPI.prototype.tokenRefreshed = function (handler) {
-this.handler.tokenRefreshed = handler
+  this.handler.tokenRefreshed = handler
 }
 
 HttpAPI.prototype.logout = async function () {
   await this.client.post('v3/logout')
   delete this.credentials
+}
+
+HttpAPI.prototype.capabilities = async function () {
+  return this.client.get('v3/capabilities').json()
 }
 
 HttpAPI.prototype.getRoomHierarchy = async function (roomId) {
