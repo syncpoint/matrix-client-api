@@ -39,10 +39,8 @@ const MatrixClient = (loginData) => ({
       timelineAPI: new TimelineAPI(httpAPI)
     }
     const projectList = new ProjectList(projectListParames)
-    projectList.logout = async () => {
-      return httpAPI.logout()
-    }
     projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+    projectList.credentials = () => (httpAPI.credentials)
     return projectList
   },
 
@@ -55,10 +53,8 @@ const MatrixClient = (loginData) => ({
       commandAPI: new CommandAPI(httpAPI)
     }
     const project = new Project(projectParams)
-    project.logout = async () => {
-      return httpAPI.logout()
-    }
     project.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+    project.credentials = () => (httpAPI.credentials)
     return project
   }
 })
