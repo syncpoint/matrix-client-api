@@ -79,7 +79,7 @@ function HttpAPI (credentials) {
 /*
   static functions
 */
-HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password, device_id }, refreshTokenSupported = true) {
+HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password, device_id }) {
   const options = {
     type: 'm.login.password',
     identifier: {
@@ -87,20 +87,53 @@ HttpAPI.loginWithPassword = async function ({ home_server_url, user_id, password
       user: user_id
     },
     password,
-    device_id,
-    refresh_token: refreshTokenSupported
+    device_id
   }
 
   return this.login(home_server_url, options)
 }
 
 HttpAPI.login = async function (homeServerUrl, options) {
+  const defaults = {
+    refresh_token: true
+  }     
+  const body = {...defaults, ...options}
 
   const loginResult = await ky.post('v3/login', {
     prefixUrl: new URL('/_matrix/client', homeServerUrl),
-    json: options,
+    json: body,
     retry: {
-      limit: 3
+      limit: 3,
+      maxRetryAfter: 5 * 60 * 1000,
+      statusCodes: [ 429 ],
+      methods: ['post']
+    },
+    hooks: {
+      afterResponse: [
+        async (request, options, response) => {
+          if (response.status !== 429) {
+            return response
+          }
+
+          const body = await response.json()
+          const { retry_after_ms: retryAfter } = body
+          if (!retryAfter) return response
+
+          const headers = { 'Retry-After': Math.ceil(1.05 * retryAfter / 1000)}
+          response.headers.forEach((v, k) => headers[k] = v)
+
+          const retryAfterResponse = new Response(null, {
+            headers: new Headers(headers),
+            status: 429,
+            statusText: response.statusText,
+            type: response.type,
+            url: response.url
+          })
+          console.log(`Retrying at ${(new Date(Date.now() + retryAfter)).toISOString()}`)
+          return retryAfterResponse          
+
+        }
+      ]
     }
   }).json()
 
@@ -115,7 +148,7 @@ HttpAPI.getWellKnownClientInfo = async function (homeServerUrl) {
       limit: 1
     },
     throwHttpErrors: false
-  })
+  }).json()
 }
 
 HttpAPI.getWellKnownServerInfo = async function (homeServerUrl) {
@@ -147,10 +180,6 @@ HttpAPI.prototype.tokenRefreshed = function (handler) {
 HttpAPI.prototype.logout = async function () {
   await this.client.post('v3/logout')
   delete this.credentials
-}
-
-HttpAPI.prototype.capabilities = async function () {
-  return this.client.get('v3/capabilities').json()
 }
 
 HttpAPI.prototype.getRoomHierarchy = async function (roomId) {
