@@ -7,29 +7,36 @@ const errors = {
   ERROR: 'ERROR'
 }
 
+class DiscoveryError extends Error {
+  constructor (message, errorCode) {
+    super(message)
+    this.code = errorCode
+  }
+}
+
 const discover =  async ({ home_server_url, user_id }) => {
   
   const serverUrl = home_server_url ? home_server_url : `https://${user_id.split(':')[1]}`
 
-  const response = await HttpAPI.getWellKnownClientInfo(serverUrl)
-  
-  /*
-    See implementation rules https://spec.matrix.org/v1.6/client-server-api/#well-known-uri
-  */
-  if (!response) return errors.FAIL_PROMPT
-  if (response.status === 404) return errors.IGNORE
+  let supported
+  let clientInfo
+
   try {
-    const body = JSON.parse(response.body)
-    const baseUrl = body['m.homeserver']?.base_url
-    if (!baseUrl) return errors.FAIL_PROMPT
+    supported = await HttpAPI.getVersions(serverUrl)
+    clientInfo = await HttpAPI.getWellKnownClientInfo(serverUrl)
+    const baseUrl = clientInfo['m.homeserver']?.base_url
     return baseUrl
-  } catch {
-    return errors.FAIL_ERROR
+  } catch (error) {
+    /*
+      See implementation rules https://spec.matrix.org/v1.7/client-server-api/#well-known-uri
+    */
+    if (!supported) throw new DiscoveryError(`No matrix server found at ${serverUrl}`, errors.FAIL_ERROR)
+    if (!clientInfo) throw new DiscoveryError(`No well-known client information`, errors.FAIL_PROMPT)
   }
-  
 }
 
 
 export {
-  discover
+  discover,
+  errors
 }

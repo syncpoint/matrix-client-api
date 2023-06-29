@@ -146,8 +146,7 @@ HttpAPI.getWellKnownClientInfo = async function (homeServerUrl) {
     prefixUrl: homeServerUrl,
     retry: {
       limit: 1
-    },
-    throwHttpErrors: false
+    }
   }).json()
 }
 
@@ -156,9 +155,20 @@ HttpAPI.getWellKnownServerInfo = async function (homeServerUrl) {
     prefixUrl: homeServerUrl,
     retry: {
       limit: 1
-    },
-    throwHttpErrors: false
-  })
+    }
+  }).json()
+}
+
+/**
+ * 
+ * @param {*} homeServerUrl 
+ * @returns An object that lists the supported versions of the [matrix] specification.
+ */
+HttpAPI.getVersions = async function (homeServerUrl) {
+  return ky.get('_matrix/client/versions', {
+    prefixUrl: homeServerUrl,
+    retry: 1
+  }).json()
 }
 
 /*

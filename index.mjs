@@ -4,7 +4,7 @@ import { TimelineAPI } from './src/timeline-api.mjs'
 import { CommandAPI } from './src/command-api.mjs'
 import { ProjectList } from './src/project-list.mjs'
 import { Project } from './src/project.mjs'
-import { discover } from './src/discover-api.mjs'
+import { discover, errors } from './src/discover-api.mjs'
 import { chill } from './src/convenience.mjs'
 
 /*
@@ -21,6 +21,10 @@ const connect = (credentials) => async () => {
       await discover(credentials)
       connected = true
     } catch (error) {
+      if (error.code === errors.FAIL_PROMPT) {
+        connected = true
+        continue
+      }
       if (chillFactor < MAX_CHILL_FACTOR) chillFactor++
     }
   } 
