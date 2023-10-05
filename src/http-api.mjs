@@ -255,8 +255,42 @@ HttpAPI.prototype.forget = async function (roomId) {
   return this.client.post(`v3/rooms/${roomId}/forget`).json()
 }
 
+HttpAPI.prototype.kick = async function (roomId, userId) {
+  return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/kick`, {
+    json: {
+      user_id: userId
+    }
+  }).json()
+}
+
+HttpAPI.prototype.ban = async function (roomId, userId) {
+  return this.client.post(`v3/rooms/${encodeURIComponent(roomId)}/ban`, {
+    json: {
+      user_id: userId
+    }
+  }).json()
+}
+
 HttpAPI.prototype.joinedRooms = async function () {
   return this.client.get('v3/joined_rooms').json()
+}
+
+HttpAPI.prototype.members = async function (roomId, exclude = 'leave') {
+  return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/members?not_memebership=${exclude}`).json()
+}
+
+HttpAPI.prototype.searchInUserDirectory = async function (term) {
+  return this.client.post('v3/user_directory/search', {
+    json: {
+      limit: 50,
+      search_term: term
+    }
+  }).json()
+}
+
+HttpAPI.prototype.getMediaContentUrl = function (url) {
+  const mxcUrl = url.replace('mxc://','') 
+  return (new URL(`/_matrix/media/v3/download/${mxcUrl}`, this.credentials.home_server_url)).toString()  
 }
 
 
