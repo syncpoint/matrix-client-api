@@ -107,6 +107,10 @@ class StructureAPI {
     return this.httpAPI.members(globalId)
   }
 
+  async kick (globalId, userId) {
+    return this.httpAPI.kick(globalId, userId)
+  }
+
   async permissions (globalId, userId) {
     const state = await this.httpAPI.getState(globalId)
     const roomPowerlevels = state.find(stateEvent => stateEvent.type === 'm.room.power_levels')

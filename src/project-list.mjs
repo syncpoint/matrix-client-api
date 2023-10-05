@@ -72,6 +72,11 @@ ProjectList.prototype.join = async function (projectId) {
   }
 }
 
+ProjectList.prototype.kick = async function (projectId, userId) {
+  const upstreamId = this.wellKnown.get(projectId)
+  return this.structureAPI.kick(upstreamId, userId)
+}
+
 ProjectList.prototype.setName = async function (projectId, name) {
   const upstreamId = this.wellKnown.get(projectId)
   return this.structureAPI.setName(upstreamId, name)
