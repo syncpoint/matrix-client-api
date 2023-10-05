@@ -1,8 +1,7 @@
 const action = {
   INVITE: 'invite',
   KICK: 'kick',
-  BAN: 'ban',
-  REDACT: 'redact'
+  BAN: 'ban'
 }
 
 const canExecute = function (userId, action, roomPowerlevels) {

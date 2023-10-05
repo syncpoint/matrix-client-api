@@ -47,8 +47,7 @@ describe('Powerlevels', function () {
     const actions = [
       { value: power.action.INVITE, expected: true },
       { value: power.action.KICK, expected: false },
-      { value: power.action.BAN, expected: false },
-      { value: power.action.REDACT, expected: false }
+      { value: power.action.BAN, expected: false }
     ]
 
     actions.forEach(({ value, expected }) => {
@@ -67,8 +66,7 @@ describe('Powerlevels', function () {
     const actions = [
       { value: power.action.INVITE, expected: true },
       { value: power.action.KICK, expected: false },
-      { value: power.action.BAN, expected: false },
-      { value: power.action.REDACT, expected: false }
+      { value: power.action.BAN, expected: false }
     ]
 
     actions.forEach(({ value, expected }) => {
@@ -87,8 +85,7 @@ describe('Powerlevels', function () {
     const actions = [
       { value: power.action.INVITE, expected: true },
       { value: power.action.KICK, expected: true },
-      { value: power.action.BAN, expected: true },
-      { value: power.action.REDACT, expected: true }
+      { value: power.action.BAN, expected: true }
     ]
 
     actions.forEach(({ value, expected }) => {
@@ -105,8 +102,7 @@ describe('Powerlevels', function () {
       const expected = {
         invite: true,
         kick: false,
-        ban: false,
-        redact: false
+        ban: false
       }
 
       const result = power.permissions('@delta:domain.tld', ROOM_POWER_LEVEL)
