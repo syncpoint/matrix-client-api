@@ -82,6 +82,39 @@ ProjectList.prototype.setDescription = async function (projectId, description) {
   return this.structureAPI.setTopic(upstreamId, description)
 }
 
+ProjectList.prototype.members = async function (projectId) {
+  const upstreamId = this.wellKnown.get(projectId)
+  const result = await this.structureAPI.members(upstreamId)
+  const members = (result.chunk || []).map(event => ({
+    membership: event.content.membership,
+    displayName: event.content.displayName,
+    userId: event.state_key,
+    avatarUrl: this.structureAPI.mediaContentUrl(event.content.avatar_url)
+  }))
+  return members
+}
+
+ProjectList.prototype.searchUsers = async function (term) {
+  const { results } = await this.structureAPI.searchInUserDirectory(term)
+  return results.map(user => ({
+    displayName: user.display_name,
+    userId: user.user_id,
+    avatarUrl: this.structureAPI.mediaContentUrl(user.avatar_url)
+  }))
+}
+
+/**
+ * 
+ * @param {String} projectId 
+ * @param {String} userId. If not provided the currently logged in userId will be used.
+ * @returns {Object} An object that has the actions (invite, kick, ban, redact) as keys and boolen values
+ * to indicate if this action is allowed for the given userId.
+ */
+ProjectList.prototype.permissions = async function (projectId, userId) {
+  const upstreamId = this.wellKnown.get(projectId)
+  return this.structureAPI.permissions(upstreamId, userId || this.timelineAPI.credentials().user_id)
+}
+
 ProjectList.prototype.start = async function (streamToken, handler = {}) {
   if (this.stream) return //already started
 

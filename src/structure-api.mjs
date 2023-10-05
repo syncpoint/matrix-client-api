@@ -1,4 +1,5 @@
 import { roomStateReducer } from './convenience.mjs'
+import * as power from './powerlevel.mjs'
 
 /**
  * @readonly
@@ -100,6 +101,25 @@ class StructureAPI {
    */
   async leave (globalId) {
     return this.httpAPI.leave(globalId)
+  }
+
+  async members (globalId) {
+    return this.httpAPI.members(globalId)
+  }
+
+  async permissions (globalId, userId) {
+    const state = await this.httpAPI.getState(globalId)
+    const roomPowerlevels = state.find(stateEvent => stateEvent.type === 'm.room.power_levels')
+    return power.permissions(userId, roomPowerlevels.content)
+  }
+
+  mediaContentUrl (mediaUrl) {
+    if (!mediaUrl) return undefined
+    return this.httpAPI.getMediaContentUrl(mediaUrl)
+  }
+
+  async searchInUserDirectory (term) {
+    return this.httpAPI.searchInUserDirectory(term)
   }
 
   /**
