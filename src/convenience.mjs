@@ -48,10 +48,11 @@ const roomStateReducer = (acc, event) => {
     case 'm.room.create': {
       acc.type = (event.content?.type) ? event.content.type : 'm.room'
       acc.id = event.content['io.syncpoint.odin.id']
+      acc.creator = event.content.creator
       break 
     }
     case 'm.room.name': { acc.name = event.content.name; break }
-    case 'm.room.canonical_alias': { acc.canonical_alias = event.content.alias; break }
+    case 'm.room.canonical_alias': { acc.alias = event.content.canonical_alias; break }
     case 'm.room.topic': { acc.topic = event.content.topic; break }
     case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
     case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
