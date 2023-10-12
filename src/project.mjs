@@ -71,7 +71,8 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
     layers: Object.values(hierarchy.layers).map(layer => ({
       id: layer.id,
       name: layer.name,
-      topic: layer.topic
+      topic: layer.topic,
+      creator: layer.creator
     })),
     invitations: hierarchy.candidates.map(candidate => ({
       id: Base64.encode(candidate.id),
