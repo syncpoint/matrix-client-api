@@ -22,9 +22,9 @@ const discover =  async ({ home_server_url, user_id }) => {
   let clientInfo
 
   try {
-    supported = await HttpAPI.getVersions(serverUrl)
     clientInfo = await HttpAPI.getWellKnownClientInfo(serverUrl)
     const baseUrl = clientInfo['m.homeserver']?.base_url
+    supported = await HttpAPI.getVersions(baseUrl)
     return baseUrl
   } catch (error) {
     /*
