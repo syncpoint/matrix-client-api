@@ -11,14 +11,14 @@ import { chill } from './src/convenience.mjs'
   connect() resolves if the home_server can be connected. It does
   not fail but tries to connect endlessly
 */
-const connect = (credentials) => async () => {
+const connect = (home_server_url) => async () => {
   const MAX_CHILL_FACTOR = 64
   let chillFactor = 0
   let connected = false
   while (!connected) {
     await chill(chillFactor)
     try {
-      await discover(credentials)
+      await discover({ home_server_url })
       connected = true
     } catch (error) {
       if (error.code === errors.FAIL_PROMPT) {
@@ -30,10 +30,19 @@ const connect = (credentials) => async () => {
   } 
 }
 
+/**
+ * @typedef {Object} LoginData
+ * @property {String} user_id
+ * @property {String} password
+ * @property {String} home_server_url
+ * 
+ * @param {LoginData} loginData 
+ * @returns {Object} matrixClient
+ */
 const MatrixClient = (loginData) => ({
 
-  connect: connect(loginData),
-
+  connect: connect(loginData.home_server_url),
+  
   projectList: async mostRecentCredentials => {
     
     const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
@@ -64,5 +73,6 @@ const MatrixClient = (loginData) => ({
 })
 
 export {
-  MatrixClient
+  MatrixClient,
+  discover
 }
