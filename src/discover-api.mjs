@@ -14,29 +14,37 @@ class DiscoveryError extends Error {
   }
 }
 
-const discover =  async ({ home_server_url, user_id }) => {
+const discover =  async function ({ home_server_url, user_id }) {
   
-  const serverUrl = home_server_url ? home_server_url : `https://${user_id.split(':')[1]}`
-
-  let supported
-  let clientInfo
+  const serverUrl = home_server_url ? home_server_url : `https://${user_id.split(':')[1]}`  
 
   try {
-    clientInfo = await HttpAPI.getWellKnownClientInfo(serverUrl)
-    const baseUrl = clientInfo['m.homeserver']?.base_url
-    supported = await HttpAPI.getVersions(baseUrl)
-    return baseUrl
-  } catch (error) {
     /*
       See implementation rules https://spec.matrix.org/v1.7/client-server-api/#well-known-uri
     */
-    if (!supported) throw new DiscoveryError(`No matrix server found at ${serverUrl}`, errors.FAIL_ERROR)
-    if (!clientInfo) throw new DiscoveryError(`No well-known client information`, errors.FAIL_PROMPT)
+    let response
+    response = await HttpAPI.getWellKnownClientInfo(serverUrl)
+
+    const clientInfoStatusCodes = [200, 404]
+
+    if (!clientInfoStatusCodes.includes(response.status)) throw new DiscoveryError('Well-Known client info URL not found', errors.FAIL_PROMPT)
+    const clientInfo = response.status === 200 ? await response.json() : undefined
+    const baseUrl =  (clientInfo) ? clientInfo['m.homeserver']?.base_url : serverUrl
+
+    response = await HttpAPI.getVersions(baseUrl)
+    if (response.status !== 200) throw new DiscoveryError('Matrix versions URL not found', errors.FAIL_PROMPT)
+    const supported = await response.json()
+    if (supported?.versions?.length > 0) return baseUrl
+    else throw new DiscoveryError(`No meaningful response`, errors.ERROR)
+  } catch (error) {
+    if (error instanceof DiscoveryError) throw error
+    throw new DiscoveryError(error.cause ? error.cause.message : error.message, error.ERROR)
   }
 }
 
 
 export {
   discover,
-  errors
+  errors,
+  DiscoveryError
 }

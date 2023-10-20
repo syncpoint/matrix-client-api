@@ -146,8 +146,9 @@ HttpAPI.getWellKnownClientInfo = async function (homeServerUrl) {
     prefixUrl: homeServerUrl,
     retry: {
       limit: 1
-    }
-  }).json()
+    },
+    throwHttpErrors: false
+  })
 }
 
 HttpAPI.getWellKnownServerInfo = async function (homeServerUrl) {
@@ -155,8 +156,9 @@ HttpAPI.getWellKnownServerInfo = async function (homeServerUrl) {
     prefixUrl: homeServerUrl,
     retry: {
       limit: 1
-    }
-  }).json()
+    },
+    throwHttpErrors: false
+  })
 }
 
 /**
@@ -167,8 +169,11 @@ HttpAPI.getWellKnownServerInfo = async function (homeServerUrl) {
 HttpAPI.getVersions = async function (homeServerUrl) {
   return ky.get('_matrix/client/versions', {
     prefixUrl: homeServerUrl,
-    retry: 1
-  }).json()
+    retry: {
+      limit: 1
+    },
+    throwHttpErrors: false
+  })
 }
 
 /*

@@ -1,4 +1,4 @@
-import { FIFO } from '../src/queue.mjs'
+/* import { FIFO } from '../src/queue.mjs'
 
 const jobs = new FIFO()
 
@@ -20,3 +20,4 @@ for await (const job of jobs) {
 
 
 
+ */
