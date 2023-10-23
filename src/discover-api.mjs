@@ -33,7 +33,11 @@ class DiscoveryError extends Error {
  */
 const discover =  async function ({ user_id, home_server_url  }) {
   
-  const serverUrl = home_server_url ? home_server_url : `https://${user_id.split(':')[1]}`  
+  const serverUrl = home_server_url ? home_server_url : `https://${user_id.split(':')[1]}`
+
+  const removeTrailingSlash = url => {
+    return url[url.length - 1] === '/' ? url.substring(0, url.length - 1) : url
+  }
 
   try {
     /*
@@ -53,7 +57,7 @@ const discover =  async function ({ user_id, home_server_url  }) {
     const supported = await response.json()
     if (supported?.versions?.length > 0) return {
       user_id: user_id,
-      home_server_url: baseUrl,
+      home_server_url: removeTrailingSlash(baseUrl),
       capabilities: supported
     }
     throw new DiscoveryError(`No meaningful response`, errors.ERROR)

@@ -4,18 +4,18 @@ import { discover, DiscoveryError } from "../src/discover-api.mjs"
 
 describe('Discover', function () {
   it('a matrix server by the user\'s FQMN', async function () {
-    const result = await discover({ user_id: '@some.name:matrix.org'})
-    assert.equal(result, 'https://matrix-client.matrix.org')
+    const result = await discover({ user_id: '@some.name:syncpoint.io'})
+    assert.equal(result.home_server_url, 'https://matrix.syncpoint.io')
   })
 
   it('a matrix server by the user\'s domain home_server_url', async function () {
-    const result = await discover({ home_server_url: 'https://matrix.org'})
-    assert.equal(result, 'https://matrix-client.matrix.org')
+    const result = await discover({ home_server_url: 'https://syncpoint.io'})
+    assert.equal(result.home_server_url, 'https://matrix.syncpoint.io')
   })
 
   it('a matrix server by the user\'s FQDN home_server_url', async function () {
-    const result = await discover({ home_server_url: 'https://matrix-client.matrix.org'})
-    assert.equal(result, 'https://matrix-client.matrix.org')
+    const result = await discover({ home_server_url: 'https://matrix.syncpoint.io'})
+    assert.equal(result.home_server_url, 'https://matrix.syncpoint.io')
   })
 
   it('fail on an invalid hostname', async function () {
