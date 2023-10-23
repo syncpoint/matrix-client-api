@@ -11,23 +11,24 @@ import { chill } from './src/convenience.mjs'
   connect() resolves if the home_server can be connected. It does
   not fail but tries to connect endlessly
 */
-const connect = (home_server_url) => async () => {
+const connect = (home_server_url) => async (controller) => {
   const MAX_CHILL_FACTOR = 64
   let chillFactor = 0
   let connected = false
-  while (!connected) {
-    await chill(chillFactor)
+  while (!connected || controller?.signal?.aborted) {
+    await chill(chillFactor, controller?.signal)
     try {
       await discover({ home_server_url })
       connected = true
     } catch (error) {
+      if (error.name === 'AbortError') throw error
       if (error.code === errors.FAIL_PROMPT) {
         connected = true
         continue
       }
       if (chillFactor < MAX_CHILL_FACTOR) chillFactor++
     }
-  } 
+  }
 }
 
 /**
@@ -74,5 +75,6 @@ const MatrixClient = (loginData) => ({
 
 export {
   MatrixClient,
+  connect,
   discover
 }
