@@ -92,7 +92,7 @@ ProjectList.prototype.members = async function (projectId) {
   const result = await this.structureAPI.members(upstreamId)
   const members = (result.chunk || []).map(event => ({
     membership: event.content.membership,
-    displayName: event.content.displayName,
+    displayName: event.content.displayname,
     userId: event.state_key,
     avatarUrl: this.structureAPI.mediaContentUrl(event.content.avatar_url)
   }))
