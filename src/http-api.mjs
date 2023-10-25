@@ -287,7 +287,7 @@ HttpAPI.prototype.members = async function (roomId, exclude = 'leave') {
 HttpAPI.prototype.searchInUserDirectory = async function (term) {
   return this.client.post('v3/user_directory/search', {
     json: {
-      limit: 50,
+      limit: 5,
       search_term: term
     }
   }).json()
