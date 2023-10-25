@@ -126,6 +126,10 @@ class StructureAPI {
     return this.httpAPI.searchInUserDirectory(term)
   }
 
+  async profile (userId) {
+    return this.httpAPI.getProfile(userId)
+  }
+
   /**
    * @description Returns the project structure hierarchy (tree).
    * @param {MatrixRoomId} globalId - The [matrix] roomId of the project 

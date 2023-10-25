@@ -102,10 +102,23 @@ ProjectList.prototype.members = async function (projectId) {
 ProjectList.prototype.searchUsers = async function (term) {
   const { results } = await this.structureAPI.searchInUserDirectory(term)
   return results.map(user => ({
-    displayName: user.display_name,
+    displayName: user.display_name,   // ANNOYING! display_name
     userId: user.user_id,
     avatarUrl: this.structureAPI.mediaContentUrl(user.avatar_url)
   }))
+}
+
+ProjectList.prototype.profile = async function (userId) {
+  try {
+    const profile = await this.structureAPI.profile(userId)
+    return {
+      displayName: profile.displayname,  // ANNOYING! displayname
+      userId,
+      avatarUrl: this.structureAPI.mediaContentUrl(profile.avatar_url)
+    }
+  } catch (error) {
+    return null
+  }
 }
 
 /**

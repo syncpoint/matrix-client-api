@@ -293,6 +293,10 @@ HttpAPI.prototype.searchInUserDirectory = async function (term) {
   }).json()
 }
 
+HttpAPI.prototype.getProfile = async function (userId) {
+  return this.client.get(`v3/profile/${encodeURIComponent(userId)}`).json()
+}
+
 HttpAPI.prototype.getMediaContentUrl = function (url) {
   const mxcUrl = url.replace('mxc://','') 
   return (new URL(`/_matrix/media/v3/download/${mxcUrl}`, this.credentials.home_server_url)).toString()  
