@@ -125,18 +125,6 @@ ProjectList.prototype.profile = async function (userId) {
   }
 }
 
-/**
- * 
- * @param {String} projectId 
- * @param {String} userId. If not provided the currently logged in userId will be used.
- * @returns {Object} An object that has the actions (invite, kick, ban, redact) as keys and boolen values
- * to indicate if this action is allowed for the given userId.
- */
-ProjectList.prototype.permissions = async function (projectId, userId) {
-  const upstreamId = this.wellKnown.get(projectId)
-  return this.structureAPI.permissions(upstreamId, userId || this.timelineAPI.credentials().user_id)
-}
-
 ProjectList.prototype.start = async function (streamToken, handler = {}) {
   if (this.stream) return //already started
 
