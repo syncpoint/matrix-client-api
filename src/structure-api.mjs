@@ -111,16 +111,6 @@ class StructureAPI {
     return this.httpAPI.kick(globalId, userId)
   }
 
-  /**
-   * 
-   * @deprecated: use powerlevel instead
-   */
-  async permissions (globalId, userId) {
-    const state = await this.httpAPI.getState(globalId)
-    const roomPowerlevels = state.find(stateEvent => stateEvent.type === 'm.room.power_levels')
-    return power.permissions(userId, roomPowerlevels.content)
-  }
-
   async powerlevel (globalId, userId) {
     const state = await this.httpAPI.getState(globalId)
     const roomPowerlevels = state.find(stateEvent => stateEvent.type === 'm.room.power_levels')
