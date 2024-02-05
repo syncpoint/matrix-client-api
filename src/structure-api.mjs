@@ -175,10 +175,13 @@ class StructureAPI {
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       if (!layerRoomIds.includes(roomId)) continue
       const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
-      if (room.power_levels) {
-        room.powerlevel = (power.powerlevel(this.httpAPI.credentials.user_id, room.power_levels))
-        delete room.power_levels
-      }
+      
+      const scope = (roomId === globalId) 
+                    ? power.SCOPE.PROJECT
+                    : power.SCOPE.LAYER
+      room.powerlevel = (power.powerlevel(this.httpAPI.credentials.user_id, room.power_levels, scope))
+      delete room.power_levels
+      
       if (roomId === globalId) // space!
       {
         space = room
@@ -335,7 +338,7 @@ class StructureAPI {
           'm.room.server_acl': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.encryption': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.space.parent': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
-          'io.syncpoint.odin.operation': power.ROLES.CONTRIBUTOR.powerlevel
+          'io.syncpoint.odin.operation': power.ROLES.LAYER.CONTRIBUTOR.powerlevel
         },
         'events_default': power.ROLES.LAYER.MANAGER.powerlevel,
         'state_default': power.ROLES.LAYER.MANAGER.powerlevel,
