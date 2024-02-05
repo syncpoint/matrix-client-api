@@ -147,10 +147,10 @@ class StructureAPI {
   async project (globalId) {
     const hierarchy = await this.httpAPI.getRoomHierarchy(globalId)
 
-    const space = hierarchy.rooms.find(room => room.room_type === 'm.space')
+    // const space = hierarchy.rooms.find(room => room.room_type === 'm.space')
     
     const layerRoomIds = hierarchy.rooms
-      .filter(room => room.room_type === 'io.syncpoint.odin.layer')
+      // .filter(room => room.room_type === 'io.syncpoint.odin.layer')
       .map(room => room.room_id)
 
     const filter = {
@@ -170,7 +170,8 @@ class StructureAPI {
     }
     const state = await this.httpAPI.sync(undefined, filter, 0)
     
-    const layers = {}    
+    const layers = {}
+    let space = undefined
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       if (!layerRoomIds.includes(roomId)) continue
       const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
@@ -178,7 +179,13 @@ class StructureAPI {
         room.powerlevel = (power.powerlevel(this.httpAPI.credentials.user_id, room.power_levels))
         delete room.power_levels
       }
-      layers[roomId] = room
+      if (roomId === globalId) // space!
+      {
+        space = room
+      } else {
+        layers[roomId] = room
+      }
+      
     }
 
     /*
@@ -198,11 +205,12 @@ class StructureAPI {
     
 
     const project = {
-      room_id: space.room_id,
       name: space.name,
+      powerlevel: space.powerlevel,
+      room_id: space.room_id,
       topic: space.topic,
+      candidates, // invitations
       layers,
-      candidates
     }    
 
     return project

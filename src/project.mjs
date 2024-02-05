@@ -67,6 +67,7 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   const projectStructure = {
     id,
     name: hierarchy.name,
+    powerlevel: hierarchy.powerlevel.name,
     topic: hierarchy.topic,
     layers: Object.values(hierarchy.layers).map(layer => ({
       creator: layer.creator,
