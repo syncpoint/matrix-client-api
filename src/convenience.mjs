@@ -1,3 +1,5 @@
+import { powerlevel } from "./powerlevel.mjs"
+
 const effectiveFilter = filter => {
   if (!filter) return
   if (typeof filter === 'string') return filter
@@ -48,7 +50,7 @@ const roomStateReducer = (acc, event) => {
     case 'm.room.create': {
       acc.type = (event.content?.type) ? event.content.type : 'm.room'
       acc.id = event.content['io.syncpoint.odin.id']
-      acc.creator = event.content.creator
+      acc.creator = event.sender
       break 
     }
     case 'm.room.name': { acc.name = event.content.name; break }
@@ -56,6 +58,7 @@ const roomStateReducer = (acc, event) => {
     case 'm.room.topic': { acc.topic = event.content.topic; break }
     case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
     case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
+    case 'm.room.power_levels': { acc.power_levels = event.content; break }
     // case 'io.syncpoint.odin.id': { acc.id = event.content?.id; break }
   }
   return acc

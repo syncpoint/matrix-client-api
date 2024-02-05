@@ -111,10 +111,20 @@ class StructureAPI {
     return this.httpAPI.kick(globalId, userId)
   }
 
+  /**
+   * 
+   * @deprecated: use powerlevel instead
+   */
   async permissions (globalId, userId) {
     const state = await this.httpAPI.getState(globalId)
     const roomPowerlevels = state.find(stateEvent => stateEvent.type === 'm.room.power_levels')
     return power.permissions(userId, roomPowerlevels.content)
+  }
+
+  async powerlevel (globalId, userId) {
+    const state = await this.httpAPI.getState(globalId)
+    const roomPowerlevels = state.find(stateEvent => stateEvent.type === 'm.room.power_levels')
+    return power.powerlevel(userId, roomPowerlevels)
   }
 
   mediaContentUrl (mediaUrl) {
@@ -138,6 +148,7 @@ class StructureAPI {
     const hierarchy = await this.httpAPI.getRoomHierarchy(globalId)
 
     const space = hierarchy.rooms.find(room => room.room_type === 'm.space')
+    
     const layerRoomIds = hierarchy.rooms
       .filter(room => room.room_type === 'io.syncpoint.odin.layer')
       .map(room => room.room_id)
@@ -163,6 +174,10 @@ class StructureAPI {
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       if (!layerRoomIds.includes(roomId)) continue
       const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
+      if (room.power_levels) {
+        room.powerlevel = (power.powerlevel(this.httpAPI.credentials.user_id, room.power_levels))
+        delete room.power_levels
+      }
       layers[roomId] = room
     }
 
@@ -200,7 +215,7 @@ class StructureAPI {
    * @param {string} friendlyName - This name will be shown in the "project" view for every node that gets invited to join the project.
    * @returns 
    */
-  async createProject (localId, friendlyName, description) {
+  async createProject (localId, friendlyName, description, defaultUserRole = power.ROLES.PROJECT.CONTRIBUTOR) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
@@ -208,40 +223,55 @@ class StructureAPI {
       creation_content: {
         type: 'm.space',  // indicates that the room has the role of a SPACE
         // type: 'io.syncpoint.odin.project', 3mar23: breaks the parent/child hierarchy
-        guest_access: 'forbidden',
+        // guest_access: 'forbidden',
         'io.syncpoint.odin.id': localId
       },
+      initial_state: [
+        {
+          type: 'm.room.history_visibility',
+          content: {
+            history_visibility: 'shared'
+          },
+          state_key: ''
+        }, 
+        {
+          type: 'm.room.guest_access',
+          content: {
+            guest_access: 'forbidden'
+          },
+          state_key: ''
+        }
+      ],
       power_level_content_override: {
-        'users_default': 0,
+        'users_default': defaultUserRole.powerlevel,
         'events': {
-          'm.room.name': 50,
-          'm.room.power_levels': 100,
-          'm.room.history_visibility': 100,
-          'm.room.canonical_alias': 100,
-          'm.room.avatar': 50,
-          'm.room.tombstone': 100,
-          'm.room.server_acl': 100,
-          'm.room.encryption': 100,
-          'm.space.child': 0, // every member is allowed to add child rooms to the space
-          'm.room.topic': 50,
-          'm.room.pinned_events': 50,
-          'm.reaction': 100
+          'm.room.name': power.ROLES.PROJECT.MANAGER.powerlevel,
+          'm.room.power_levels': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.history_visibility': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.canonical_alias': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.avatar': power.ROLES.PROJECT.MANAGER.powerlevel,
+          'm.room.tombstone': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.server_acl': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.encryption': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.space.child': power.ROLES.PROJECT.CONTRIBUTOR.powerlevel,
+          'm.room.topic': power.ROLES.PROJECT.MANAGER.powerlevel,
+          'm.reaction': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel
         },
-        'events_default': 100,
-        'state_default': 50,
-        'ban': 50,
-        'kick': 50,
-        'redact': 50,
-        'invite': 0,
-        'historical': 100
+        'events_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+        'state_default': power.ROLES.PROJECT.MANAGER.powerlevel,
+        'ban': power.ROLES.PROJECT.MANAGER.powerlevel,
+        'kick': power.ROLES.PROJECT.MANAGER.powerlevel,
+        'redact': power.ROLES.PROJECT.MANAGER.powerlevel,
+        'invite': power.ROLES.PROJECT.MANAGER.powerlevel,
+        'historical': power.ROLES.PROJECT.READER.powerlevel
       }
     }
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
-    await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
+    /* await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
-    })
+    }) */
 
     return {
       localId,
@@ -259,45 +289,61 @@ class StructureAPI {
    * @param {string} friendlyName - This name will be shown in the "layer" scope.
    * @returns 
    */
-  async createLayer (localId, friendlyName, description) {
+  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
       visibility: 'private',
       creation_content: {
         type: 'io.syncpoint.odin.layer',
-        guest_access: 'forbidden',
         'io.syncpoint.odin.id': localId
       },
+      initial_state: [
+        {
+          type: 'm.room.history_visibility',
+          content: {
+            history_visibility: 'shared'
+          },
+          state_key: ''
+        }, 
+        {
+          type: 'm.room.guest_access',
+          content: {
+            guest_access: 'forbidden'
+          },
+          state_key: ''
+        }
+      ],
       power_level_content_override: 
       {
-        'users_default': 0,
+        'users_default': defaultUserRole.powerlevel,
         'events': {
-          'm.room.name': 0,
-          'm.room.power_levels': 100,
-          'm.room.history_visibility': 100,
-          'm.room.canonical_alias': 100,
-          'm.room.avatar': 50,
-          'm.room.tombstone': 100,
-          'm.room.server_acl': 100,
-          'm.room.encryption': 100,
-          'm.space.parent': 0
+          'm.room.name': power.ROLES.LAYER.MANAGER.powerlevel,
+          'm.room.power_levels': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'm.room.history_visibility': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'm.room.canonical_alias': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'm.room.avatar': power.ROLES.LAYER.MANAGER.powerlevel,
+          'm.room.tombstone': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'm.room.server_acl': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'm.room.encryption': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'm.space.parent': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+          'io.syncpoint.odin.operation': power.ROLES.CONTRIBUTOR.powerlevel
         },
-        'events_default': 0,
-        'state_default': 50,
-        'ban': 50,
-        'kick': 50,
-        'redact': 50,
-        'invite': 0,
-        'historical': 100
+        'events_default': power.ROLES.LAYER.MANAGER.powerlevel,
+        'state_default': power.ROLES.LAYER.MANAGER.powerlevel,
+        'ban': power.ROLES.LAYER.MANAGER.powerlevel,
+        'kick': power.ROLES.LAYER.MANAGER.powerlevel,
+        'redact': power.ROLES.LAYER.MANAGER.powerlevel,
+        'invite': power.ROLES.LAYER.MANAGER.powerlevel,
+        'historical': power.ROLES.LAYER.READER.powerlevel
       }
     }
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
-    await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
+    /* await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
       guest_access: 'forbidden'
-    })
+    }) */
 
     return {
       localId,
@@ -305,7 +351,8 @@ class StructureAPI {
       globalId,
       friendlyName,
       /** @type {ROOM_TYPE} */
-      type: ROOM_TYPE.LAYER
+      type: ROOM_TYPE.LAYER,
+      powerlevel: power.ROLES.LAYER.ADMINISTRATOR.name
     }
   }
 

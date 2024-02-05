@@ -37,77 +37,53 @@ const ROOM_POWER_LEVEL =
    "historical": 100
  }
 
+describe('A role based powerlevel', function () {
+    const roomPowerlevel = {
+      "users": {
+          "@fall:trigonometry.digital": 100,
+          "@summer:trigonometry.digital": 50,
+          "@spring:trigonometry.digital": 25
+      },
+      "users_default": 0,
+      "events": {
+          "m.room.name": 50,
+          "m.room.power_levels": 100,
+          "io.syncpoint.odin.operation": 25
+      },
+      "events_default": 100,
+      "state_default": 100,
+      "ban": 100,
+      "kick": 100,
+      "redact": 100,
+      "invite": 100,
+      "historical": 100
+    }
 
+    it('should return ADMINISTRATOR', function () {
+      const role = power.powerlevel('@fall:trigonometry.digital', roomPowerlevel)
+      assert.equal(role.name, 'ADMINISTRATOR')
+    })
 
-describe('Powerlevels', function () {
-  describe('an unlisted user', function () {
+    it('should return MANAGER', function () {
+      const role = power.powerlevel('@summer:trigonometry.digital', roomPowerlevel)
+      assert.equal(role.name, 'MANAGER')
+    })
 
-    const userId = '@delta:domain.tld'
+    it('should return CONTRIBUTOR', function () {
+      const role = power.powerlevel('@spring:trigonometry.digital', roomPowerlevel)
+      assert.equal(role.name, 'CONTRIBUTOR')
+    })
 
-    const actions = [
-      { value: power.action.INVITE, expected: true },
-      { value: power.action.KICK, expected: false },
-      { value: power.action.BAN, expected: false }
-    ]
+    it('should return READER', function () {
+      const role = power.powerlevel('@unlisted:trigonometry.digital', roomPowerlevel)
+      assert.equal(role.name, 'READER')
+    })
 
-    actions.forEach(({ value, expected }) => {
-      it(`can ${expected ? '' : 'not '}"${value}"`, function () {
-        const allowed = power.canExecute(userId, value, ROOM_POWER_LEVEL)
-        assert.strictEqual(allowed, expected)
-      })
+    it('should return CONTRIBUTOR because of lowered PL for io.syncpoint.odin.operation', function () {
+      const collaborativePL = {...roomPowerlevel}
+      collaborativePL.events['io.syncpoint.odin.operation'] = roomPowerlevel.users_default
+      const role = power.powerlevel('@unlisted:trigonometry.digital', roomPowerlevel)
+      assert.equal(role.name, 'CONTRIBUTOR')
     })
 
   })
-
-  describe('a listed user', function () {
-
-    const userId = '@gamma:domain.tld'
-
-    const actions = [
-      { value: power.action.INVITE, expected: true },
-      { value: power.action.KICK, expected: false },
-      { value: power.action.BAN, expected: false }
-    ]
-
-    actions.forEach(({ value, expected }) => {
-      it(`can ${expected ? '' : 'not '}"${value}"`, function () {
-        const allowed = power.canExecute(userId, value, ROOM_POWER_LEVEL)
-        assert.strictEqual(allowed, expected)
-      })
-    })
-
-  })
-
-  describe('a listed user with PL 50', function () {
-
-    const userId = '@beta:domain.tld'
-
-    const actions = [
-      { value: power.action.INVITE, expected: true },
-      { value: power.action.KICK, expected: true },
-      { value: power.action.BAN, expected: true }
-    ]
-
-    actions.forEach(({ value, expected }) => {
-      it(`can ${expected ? '' : 'not '}"${value}"`, function () {
-        const allowed = power.canExecute(userId, value, ROOM_POWER_LEVEL)
-        assert.strictEqual(allowed, expected)
-      })
-    })
-
-  })
-
-  describe('permissions', function () {
-    it('will match', function () {
-      const expected = {
-        invite: true,
-        kick: false,
-        ban: false
-      }
-
-      const result = power.permissions('@delta:domain.tld', ROOM_POWER_LEVEL)
-      assert.deepEqual(result, expected)
-    })
-  })
-  
-})

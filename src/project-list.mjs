@@ -1,11 +1,15 @@
 import { roomStateReducer, wrap } from "./convenience.mjs"
+import { powerlevel, SCOPE as POWERLEVEL_SCOPE } from "./powerlevel.mjs"
 
 
 
-
-const domainMapper = matrixRoomState => {
+const domainMapper = userId => matrixRoomState => {
   const project = {...matrixRoomState}
   project.upstreamId = matrixRoomState.room_id
+  if (project.power_levels) {
+    project.powerlevel = (powerlevel(userId, project.power_levels, POWERLEVEL_SCOPE.PROJECT)).name
+    delete project.power_levels
+  }
   delete project.room_id
   delete project.type
   delete project.children
@@ -55,12 +59,12 @@ ProjectList.prototype.invite = async function (projectId, userId) {
 ProjectList.prototype.invited = async function () {
   // all projects the user is invited but has not joined
   const invited = await this.structureAPI.invitedProjects()
-  return Object.values(invited).map(domainMapper)
+  return Object.values(invited).map(domainMapper(this.timelineAPI.credentials().user_id))
 }
 
 ProjectList.prototype.joined = async function () {
   const joined = await this.structureAPI.projects()
-  return Object.values(joined).map(domainMapper)
+  return Object.values(joined).map(domainMapper(this.timelineAPI.credentials().user_id))
 }
 
 ProjectList.prototype.join = async function (projectId) {
@@ -201,7 +205,7 @@ ProjectList.prototype.start = async function (streamToken, handler = {}) {
           this.wellKnown.set(roomId, roomState.id)
           this.wellKnown.set(roomState.id, roomId)
 
-          await streamHandler.invited(domainMapper(roomState))
+          await streamHandler.invited(domainMapper(this.timelineAPI.credentials().user_id)(roomState))
         }
         
       } else {
