@@ -99,21 +99,8 @@ const canExecute = function (userId, action, roomPowerlevels) {
   return (levelAssigned >= levelRequired)
 }
 
-/**
- * @deprecated
- */
-const permissions = function (userId, roomPowerlevels) {
-  return Object
-            .values(action)
-            .reduce(( acc, current ) => {
-              acc[current] = canExecute(userId, current, roomPowerlevels)
-              return acc
-            }, {})
-}
-
 export {
   powerlevel,
-  permissions,
   ROLES,
   SCOPE
 }
