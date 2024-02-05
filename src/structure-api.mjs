@@ -189,6 +189,7 @@ class StructureAPI {
 
     const candidateIds = layerRoomIds.filter(roomId => (layers[roomId] === undefined))
     const candidates = hierarchy.rooms
+                        .filter(room => room.room_id !== globalId)
                         .filter(room => candidateIds.includes(room.room_id))
                         .map(room => ({
                           id: room.room_id,
