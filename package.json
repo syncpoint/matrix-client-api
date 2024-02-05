@@ -1,6 +1,6 @@
 {
   "name": "@syncpoint/matrix-client-api",
-  "version": "1.6.8",
+  "version": "1.7.0",
   "description": "A minimal client API for [matrix]",
   "main": "index.mjs",
   "scripts": {
@@ -12,7 +12,7 @@
     "api"
   ],
   "author": "thomas.halwax@syncpoint.io",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "dependencies": {
     "js-base64": "^3.7.5",
     "ky": "^1.1.0"
