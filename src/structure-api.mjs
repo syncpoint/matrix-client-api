@@ -406,7 +406,10 @@ class StructureAPI {
   }
 
   async getLayer (globalId) {
-    return this.httpAPI.getRoom(globalId)
+    const layer = await this.httpAPI.getRoom(globalId)
+    layer.powerlevel = (power.powerlevel(this.httpAPI.credentials.user_id, layer.power_levels)).name
+    delete layer.power_levels
+    return layer
   }
 
   /**
