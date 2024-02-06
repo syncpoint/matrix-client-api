@@ -1,6 +1,7 @@
 
 import { Base64 } from 'js-base64'
 import { wrap } from './convenience.mjs'
+import { powerlevel, ROLES } from './powerlevel.mjs'
 
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
 const M_SPACE_CHILD = 'm.space.child'
@@ -117,6 +118,13 @@ Project.prototype.setLayerName = async function (layerId, name) {
   const upstreamId = this.wellKnown.get(layerId)
   return this.structureAPI.setName(upstreamId, name)
 }
+
+Project.prototype.setDefaultPowerlevel = async function (layerId, powerlevel) {
+  const upstreamId = this.wellKnown.get(layerId)
+  return this.structureAPI.setDefaultPowerlevel(upstreamId, powerlevel)
+}
+
+Project.prototype.powerlevel = {...ROLES.LAYER}
 
 Project.prototype.content = async function (layerId) {
   const filter = { 

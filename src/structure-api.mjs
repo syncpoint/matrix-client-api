@@ -403,6 +403,13 @@ class StructureAPI {
     return layer
   }
 
+  async setDefaultPowerlevel (globalId, powerlevel) {
+    const room = await this.httpAPI.getRoom(globalId)
+    const power_levels = {...room.power_levels}
+    power_levels.users_default = powerlevel.powerlevel
+    return this.httpAPI.sendStateEvent(globalId, 'm.room.power_levels', power_levels)
+  }
+
   /**
    * 
    * @param {MatrixRoomId} globalId - The [matrix] roomId of the room to rename
