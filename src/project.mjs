@@ -69,13 +69,19 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   const projectStructure = {
     id,
     name: hierarchy.name,
-    powerlevel: hierarchy.powerlevel.name,
+    role: {
+      self: hierarchy.powerlevel.self.name,
+      default: hierarchy.powerlevel.default.name
+    },
     topic: hierarchy.topic,
     layers: Object.values(hierarchy.layers).map(layer => ({
       creator: layer.creator,
       id: layer.id,
       name: layer.name,
-      powerlevel: layer.powerlevel.name,
+      role: {
+        self: layer.powerlevel.self.name,
+        default: layer.powerlevel.default.name
+      },
       topic: layer.topic      
     })),
     invitations: hierarchy.candidates.map(candidate => ({
@@ -120,12 +126,13 @@ Project.prototype.setLayerName = async function (layerId, name) {
   return this.structureAPI.setName(upstreamId, name)
 }
 
-Project.prototype.setDefaultPowerlevel = async function (layerId, powerlevel) {
+Project.prototype.setDefaultRole = async function (layerId, role) {
   const upstreamId = this.wellKnown.get(layerId)
+  const powerlevel = power.ROLES.LAYER[role]
   return this.structureAPI.setDefaultPowerlevel(upstreamId, powerlevel)
 }
 
-Project.prototype.powerlevel = {...power.ROLES.LAYER}
+Project.prototype.roles = Object.fromEntries(Object.keys(power.ROLES.LAYER).map(k =>[k, k]))
 
 Project.prototype.content = async function (layerId) {
   const filter = { 
@@ -268,15 +275,19 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       } 
 
       if (isPowerlevelChanged(content)) {
-        const powerlevel = content
+        const role = content
           .filter(event => event.type === M_ROOM_POWER_LEVELS)
-          .map(event => (
-            {
+          .map(event => {
+            const powerlevel = power.powerlevel(this.timelineAPI.credentials().user_id, event.content)
+            return {
               id: this.wellKnown.get(roomId),
-              powerlevel: power.powerlevel(this.timelineAPI.credentials().user_id, event.content).name
+              role: {
+                self: powerlevel.self.name,
+                default: powerlevel.default.name 
+              }
             }           
-          ))
-        await streamHandler.powerlevelChanged(powerlevel)
+          })
+        await streamHandler.roleChanged(role)
       }
       
       if (isODINOperation(content)) {

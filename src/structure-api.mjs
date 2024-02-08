@@ -271,16 +271,13 @@ class StructureAPI {
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
-    /* await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
-      guest_access: 'forbidden'
-    }) */
-
     return {
       localId,
       globalId,
       friendlyName,
       /** @type {ROOM_TYPE} */
-      type: ROOM_TYPE.PROJECT
+      type: ROOM_TYPE.PROJECT,
+      powerlevel: power.ROLES.PROJECT.ADMINISTRATOR
     }
   }
 
@@ -320,7 +317,7 @@ class StructureAPI {
       {
         'users_default': defaultUserRole.powerlevel,
         'events': {
-          'm.room.name': power.ROLES.LAYER.MANAGER.powerlevel,
+          'm.room.name': power.ROLES.LAYER.CONTRIBUTOR.powerlevel,
           'm.room.power_levels': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.history_visibility': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.canonical_alias': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
@@ -354,7 +351,7 @@ class StructureAPI {
       friendlyName,
       /** @type {ROOM_TYPE} */
       type: ROOM_TYPE.LAYER,
-      powerlevel: power.ROLES.LAYER.ADMINISTRATOR.name
+      powerlevel: power.ROLES.LAYER.ADMINISTRATOR
     }
   }
 
@@ -398,7 +395,7 @@ class StructureAPI {
 
   async getLayer (globalId) {
     const layer = await this.httpAPI.getRoom(globalId)
-    layer.powerlevel = (power.powerlevel(this.httpAPI.credentials.user_id, layer.power_levels)).name
+    layer.powerlevel = power.powerlevel(this.httpAPI.credentials.user_id, layer.power_levels)
     delete layer.power_levels
     return layer
   }

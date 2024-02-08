@@ -61,29 +61,30 @@ describe('A role based powerlevel', function () {
 
     it('should return ADMINISTRATOR', function () {
       const role = power.powerlevel('@fall:trigonometry.digital', roomPowerlevel)
-      assert.equal(role.name, 'ADMINISTRATOR')
+      assert.equal(role.self.name, 'ADMINISTRATOR')
+      assert.equal(role.default.name, 'READER')
     })
 
     it('should return MANAGER', function () {
       const role = power.powerlevel('@summer:trigonometry.digital', roomPowerlevel)
-      assert.equal(role.name, 'MANAGER')
+      assert.equal(role.self.name, 'MANAGER')
     })
 
     it('should return CONTRIBUTOR', function () {
       const role = power.powerlevel('@spring:trigonometry.digital', roomPowerlevel)
-      assert.equal(role.name, 'CONTRIBUTOR')
+      assert.equal(role.self.name, 'CONTRIBUTOR')
     })
 
     it('should return READER', function () {
       const role = power.powerlevel('@unlisted:trigonometry.digital', roomPowerlevel)
-      assert.equal(role.name, 'READER')
+      assert.equal(role.self.name, 'READER')
     })
 
     it('should return CONTRIBUTOR because of lowered PL for io.syncpoint.odin.operation', function () {
       const collaborativePL = {...roomPowerlevel}
       collaborativePL.events['io.syncpoint.odin.operation'] = roomPowerlevel.users_default
       const role = power.powerlevel('@unlisted:trigonometry.digital', roomPowerlevel)
-      assert.equal(role.name, 'CONTRIBUTOR')
+      assert.equal(role.self.name, 'CONTRIBUTOR')
     })
 
   })

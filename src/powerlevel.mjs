@@ -53,7 +53,7 @@ const ROLES = {
     'CONTRIBUTOR': {
       name: 'CONTRIBUTOR',
       powerlevel: 25,
-      events: ['m.space.child'],
+      events: ['m.room.name', 'm.space.child'],
       actions: []
     },
     'READER': {
@@ -82,7 +82,10 @@ const powerlevel = function (userId, roomPowerlevels, scope = SCOPE.LAYER) {
       return (accu && (assignedLevel >= roomPowerlevels[current]))
     }, true)
 
-    if (events && actions) return r
+    if (events && actions) return {
+      self: r,
+      default: (Object.values(ROLES[scope]).find(p => p.powerlevel === roomPowerlevels.users_default))
+    }
   }
 }
 
