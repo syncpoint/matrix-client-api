@@ -1,11 +1,12 @@
 
 import { Base64 } from 'js-base64'
 import { wrap } from './convenience.mjs'
-import { powerlevel, ROLES } from './powerlevel.mjs'
+import * as power from './powerlevel.mjs'
 
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
 const M_SPACE_CHILD = 'm.space.child'
 const M_ROOM_NAME = 'm.room.name'
+const M_ROOM_POWER_LEVELS = 'm.room.power_levels'
 
 /*  The max. event size for a matrix event is 64k
     see https://spec.matrix.org/v1.6/client-server-api/#size-limits
@@ -124,7 +125,7 @@ Project.prototype.setDefaultPowerlevel = async function (layerId, powerlevel) {
   return this.structureAPI.setDefaultPowerlevel(upstreamId, powerlevel)
 }
 
-Project.prototype.powerlevel = {...ROLES.LAYER}
+Project.prototype.powerlevel = {...power.ROLES.LAYER}
 
 Project.prototype.content = async function (layerId) {
   const filter = { 
@@ -181,6 +182,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     */
     const EVENT_TYPES = [
       M_ROOM_NAME,
+      M_ROOM_POWER_LEVELS,
       M_SPACE_CHILD,
       ODINv2_MESSAGE_TYPE
     ]
@@ -208,6 +210,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
 
   const isChildAdded = events => events.some(event => event.type === M_SPACE_CHILD)
   const isLayerRenamed = events => events.some(event => event.type === M_ROOM_NAME)
+  const isPowerlevelChanged = events => events.some(event => event.type === M_ROOM_POWER_LEVELS)
   const isODINOperation = events => events.some(event => event.type === ODINv2_MESSAGE_TYPE)
 
 
@@ -254,13 +257,27 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       if (isLayerRenamed(content)) {
         const renamed = content
           .filter(event => event.type === M_ROOM_NAME)
-          .map(event => ({
-            id: this.wellKnown.get(roomId),
-            name: event.content.name
-          }))
+          .map(event => (
+            {
+              id: this.wellKnown.get(roomId),
+              name: event.content.name
+            }
+          ))
         
         await streamHandler.renamed(renamed)  
       } 
+
+      if (isPowerlevelChanged(content)) {
+        const powerlevel = content
+          .filter(event => event.type === M_ROOM_POWER_LEVELS)
+          .map(event => (
+            {
+              id: this.wellKnown.get(roomId),
+              powerlevel: power.powerlevel(this.timelineAPI.credentials().user_id, event.content).name
+            }           
+          ))
+        await streamHandler.powerlevelChanged(powerlevel)
+      }
       
       if (isODINOperation(content)) {
         const operations = content
@@ -268,7 +285,11 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           .map(event => JSON.parse(Base64.decode(event.content.content)))
           .flat()
   
-        await streamHandler.received(operations)
+        await streamHandler.received({
+          id: this.wellKnown.get(roomId),
+          operations
+        }
+        )
       }     
     })
   }
