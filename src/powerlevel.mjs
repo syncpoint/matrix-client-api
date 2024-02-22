@@ -9,19 +9,17 @@ const SCOPE = {
 // ordered by the power of the role (desc)
 const ROLES = {
   LAYER: 
-    {
+      {'OWNER': {
+        name: 'OWNER',
+        powerlevel: 111,
+        events: ['m.room.name', 'm.room.power_levels', ODINv2_MESSAGE_TYPE],
+        actions: ['kick', 'ban', 'redact']
+      },
       'ADMINISTRATOR': {
         name: 'ADMINISTRATOR',
         powerlevel: 100,
         events: ['m.room.name', 'm.room.power_levels', ODINv2_MESSAGE_TYPE],
         actions: ['kick', 'ban', 'redact']
-      },
-      'MANAGER':
-      {
-        name: 'MANAGER',
-        powerlevel: 50,
-        events: ['m.room.name', ODINv2_MESSAGE_TYPE],
-        actions: [],
       },
       'CONTRIBUTOR': {
         name: 'CONTRIBUTOR',
@@ -38,17 +36,17 @@ const ROLES = {
       }
     },
   PROJECT: {
+    'OWNER': {
+      name: 'OWNER',
+      powerlevel: 111,
+      events: ['m.room.name', 'm.room.power_levels', 'm.space.child'],
+      actions: ['kick', 'ban', 'redact', 'invite']
+    },
     'ADMINISTRATOR': {
       name: 'ADMINISTRATOR',
       powerlevel: 100,
       events: ['m.room.name', 'm.room.power_levels', 'm.space.child'],
       actions: ['kick', 'ban', 'redact', 'invite']
-    },
-    'MANAGER': {
-      name: 'MANAGER',
-      powerlevel: 50,
-      events: ['m.room.name', 'm.space.child'],
-      actions: ['kick', 'ban', 'invite'],
     },
     'CONTRIBUTOR': {
       name: 'CONTRIBUTOR',
@@ -70,6 +68,7 @@ Object.freeze(ROLES)
 
 
 const powerlevel = function (userId, roomPowerlevels, scope = SCOPE.LAYER) {
+
   const assignedLevel = (roomPowerlevels.users && roomPowerlevels.users[userId] !== undefined)
     ? roomPowerlevels.users[userId]
     : roomPowerlevels.users_default
@@ -84,7 +83,8 @@ const powerlevel = function (userId, roomPowerlevels, scope = SCOPE.LAYER) {
 
     if (events && actions) return {
       self: r,
-      default: (Object.values(ROLES[scope]).find(p => p.powerlevel === roomPowerlevels.users_default))
+      default: (Object.values(ROLES[scope]).find(p => p.powerlevel === roomPowerlevels.users_default)),
+      users: {...roomPowerlevels.users}
     }
   }
 }

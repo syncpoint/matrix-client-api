@@ -100,8 +100,18 @@ Project.prototype.shareLayer = async function (layerId, name, description) {
     return
   }
   const layer = await this.structureAPI.createLayer(layerId, name, description)
+  
   await this.structureAPI.addLayerToProject(this.wellKnown.get(this.projectId), layer.globalId)
   this.wellKnown.remember(layerId, layer.globalId)
+
+  return {
+    id: layerId,
+    upstreamId: layer.globalId,
+    role: {
+      self: layer.powerlevel.self.name,
+      default: layer.powerlevel.default.name
+    }
+  }
 }
 
 Project.prototype.joinLayer = async function (layerId) {
@@ -111,7 +121,13 @@ Project.prototype.joinLayer = async function (layerId) {
   await this.structureAPI.join(upstreamId)
   const room = await this.structureAPI.getLayer(upstreamId)  
   this.wellKnown.remember(room.id, room.room_id)
-  return room
+  const layer = {...room}
+  layer.role = {
+    self: room.powerlevel.self.name,
+    default: room.powerlevel.default.name
+  }
+  delete layer.powerlevel
+  return layer
 }
 
 Project.prototype.leaveLayer = async function (layerId) {

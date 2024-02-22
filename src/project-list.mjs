@@ -1,5 +1,6 @@
 import { roomStateReducer, wrap } from "./convenience.mjs"
-import { powerlevel, SCOPE as POWERLEVEL_SCOPE } from "./powerlevel.mjs"
+// import { powerlevel, SCOPE as POWERLEVEL_SCOPE } from "./powerlevel.mjs"
+import * as power from './powerlevel.mjs'
 
 
 
@@ -7,7 +8,7 @@ const domainMapper = userId => matrixRoomState => {
   const project = {...matrixRoomState}
   project.upstreamId = matrixRoomState.room_id
   if (project.power_levels) {
-    project.powerlevel = (powerlevel(userId, project.power_levels, POWERLEVEL_SCOPE.PROJECT)).name
+    project.powerlevel = (power.powerlevel(userId, project.power_levels, power.SCOPE.PROJECT)).name
     delete project.power_levels
   }
   delete project.room_id
@@ -46,7 +47,11 @@ ProjectList.prototype.share = async function (projectId, name, description) {
   this.wellKnown.set(result.localId, result.globalId)
   return {
     id: projectId,
-    upstreamId: result.globalId
+    upstreamId: result.globalId,
+    role: {
+      self: result.powerlevel.self.name,
+      default: result.powerlevel.default.name
+    }
   }
 }
 
@@ -93,13 +98,18 @@ ProjectList.prototype.setDescription = async function (projectId, description) {
 
 ProjectList.prototype.members = async function (projectId) {
   const upstreamId = this.wellKnown.get(projectId)
+
+  const roles = await this.getRoles(projectId)
+
   const result = await this.structureAPI.members(upstreamId)
   const members = (result.chunk || []).map(event => ({
     membership: event.content.membership,
     displayName: event.content.displayname,
     userId: event.state_key,
-    avatarUrl: this.structureAPI.mediaContentUrl(event.content.avatar_url)
+    avatarUrl: this.structureAPI.mediaContentUrl(event.content.avatar_url),
+    role: roles.users[event.state_key] ? roles.users[event.state_key] : roles.default
   }))
+
   return members
 }
 
@@ -123,6 +133,39 @@ ProjectList.prototype.profile = async function (userId) {
   } catch (error) {
     return null
   }
+}
+
+ProjectList.prototype.roles = Object.fromEntries(Object.keys(power.ROLES.PROJECT).map(k =>[k, k]))
+
+ProjectList.prototype.getRoles = async function (projectId) {
+
+  const upstreamId = this.wellKnown.get(projectId)
+  const project = await this.structureAPI.project(upstreamId)
+
+  const lookup = Object.values(power.ROLES.PROJECT)
+              .reduce((acc, current) => {
+                acc[current.powerlevel] = current.name
+                return acc
+              }, {})
+
+  const users = Object.entries(project.powerlevel.users).reduce((acc, [id, level]) => {
+    acc[id] = lookup[level]    
+    return acc
+  }, {})
+
+  const roles = {
+    self: project.powerlevel.self.name,
+    default: project.powerlevel.default.name,
+    users
+  }
+
+  return roles
+}
+
+ProjectList.prototype.setRole = async function (projectId, userId, role) {
+  const upstreamId = this.wellKnown.get(projectId)
+  const powerlevel = power.ROLES.PROJECT[role]
+  return this.structureAPI.setPowerlevel(upstreamId, userId, powerlevel)
 }
 
 ProjectList.prototype.start = async function (streamToken, handler = {}) {

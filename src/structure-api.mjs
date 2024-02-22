@@ -177,8 +177,7 @@ class StructureAPI {
         space = room
       } else {
         layers[roomId] = room
-      }
-      
+      }      
     }
 
     /*
@@ -246,29 +245,31 @@ class StructureAPI {
       ],
       power_level_content_override: {
         'users_default': defaultUserRole.powerlevel,
+        'users': {},
         'events': {
-          'm.room.name': power.ROLES.PROJECT.MANAGER.powerlevel,
+          'm.room.name': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.room.power_levels': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.room.history_visibility': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.room.canonical_alias': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
-          'm.room.avatar': power.ROLES.PROJECT.MANAGER.powerlevel,
+          'm.room.avatar': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.room.tombstone': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.room.server_acl': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.room.encryption': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.space.child': power.ROLES.PROJECT.CONTRIBUTOR.powerlevel,
-          'm.room.topic': power.ROLES.PROJECT.MANAGER.powerlevel,
+          'm.room.topic': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.reaction': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel
         },
         'events_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
-        'state_default': power.ROLES.PROJECT.MANAGER.powerlevel,
-        'ban': power.ROLES.PROJECT.MANAGER.powerlevel,
-        'kick': power.ROLES.PROJECT.MANAGER.powerlevel,
-        'redact': power.ROLES.PROJECT.MANAGER.powerlevel,
-        'invite': power.ROLES.PROJECT.MANAGER.powerlevel,
+        'state_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+        'ban': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+        'kick': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+        'redact': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+        'invite': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
         'historical': power.ROLES.PROJECT.READER.powerlevel
       }
     }
 
+    creationOptions.power_level_content_override.users[this.httpAPI.credentials.user_id] = power.ROLES.PROJECT.OWNER.powerlevel
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
     return {
@@ -277,7 +278,10 @@ class StructureAPI {
       friendlyName,
       /** @type {ROOM_TYPE} */
       type: ROOM_TYPE.PROJECT,
-      powerlevel: power.ROLES.PROJECT.ADMINISTRATOR
+      powerlevel: {
+        self: power.ROLES.LAYER.OWNER,
+        default: defaultUserRole
+      }
     }
   }
 
@@ -316,33 +320,31 @@ class StructureAPI {
       power_level_content_override: 
       {
         'users_default': defaultUserRole.powerlevel,
+        'users': {},
         'events': {
           'm.room.name': power.ROLES.LAYER.CONTRIBUTOR.powerlevel,
           'm.room.power_levels': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.history_visibility': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.canonical_alias': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
-          'm.room.avatar': power.ROLES.LAYER.MANAGER.powerlevel,
+          'm.room.avatar': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.tombstone': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.server_acl': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.encryption': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.space.parent': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'io.syncpoint.odin.operation': power.ROLES.LAYER.CONTRIBUTOR.powerlevel
         },
-        'events_default': power.ROLES.LAYER.MANAGER.powerlevel,
-        'state_default': power.ROLES.LAYER.MANAGER.powerlevel,
-        'ban': power.ROLES.LAYER.MANAGER.powerlevel,
-        'kick': power.ROLES.LAYER.MANAGER.powerlevel,
-        'redact': power.ROLES.LAYER.MANAGER.powerlevel,
-        'invite': power.ROLES.LAYER.MANAGER.powerlevel,
+        'events_default': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+        'state_default': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+        'ban': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+        'kick': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+        'redact': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
+        'invite': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
         'historical': power.ROLES.LAYER.READER.powerlevel
       }
     }
+    creationOptions.power_level_content_override.users[this.httpAPI.credentials.user_id] = power.ROLES.LAYER.OWNER.powerlevel
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
-
-    /* await this.httpAPI.sendStateEvent(globalId, 'm.room.guest_access', {
-      guest_access: 'forbidden'
-    }) */
 
     return {
       localId,
@@ -351,7 +353,10 @@ class StructureAPI {
       friendlyName,
       /** @type {ROOM_TYPE} */
       type: ROOM_TYPE.LAYER,
-      powerlevel: power.ROLES.LAYER.ADMINISTRATOR
+      powerlevel: {
+        self: power.ROLES.LAYER.OWNER,
+        default: defaultUserRole
+      }
     }
   }
 
@@ -404,6 +409,13 @@ class StructureAPI {
     const room = await this.httpAPI.getRoom(globalId)
     const power_levels = {...room.power_levels}
     power_levels.users_default = powerlevel.powerlevel
+    return this.httpAPI.sendStateEvent(globalId, 'm.room.power_levels', power_levels)
+  }
+
+  async setPowerlevel (globalId, userId, powerlevel) {
+    const room = await this.httpAPI.getRoom(globalId)
+    const power_levels = {...room.power_levels}
+    power_levels.users[userId] = powerlevel.powerlevel
     return this.httpAPI.sendStateEvent(globalId, 'm.room.power_levels', power_levels)
   }
 
