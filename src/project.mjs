@@ -132,9 +132,18 @@ Project.prototype.joinLayer = async function (layerId) {
 
 Project.prototype.leaveLayer = async function (layerId) {
   const upstreamId = this.wellKnown.get(layerId)
+  const layer = await this.structureAPI.getLayer(upstreamId)
+
   await this.structureAPI.leave(upstreamId)
   this.wellKnown.forget(layerId)
   this.wellKnown.forget(upstreamId)
+
+  /* an invitation to re-join the layer */
+  return {
+    id: Base64.encode(layer.id),
+    name: layer.name,
+    topic: layer.topic
+  }
 }
 
 Project.prototype.setLayerName = async function (layerId, name) {
