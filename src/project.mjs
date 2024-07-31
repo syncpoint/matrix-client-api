@@ -140,7 +140,7 @@ Project.prototype.leaveLayer = async function (layerId) {
 
   /* an invitation to re-join the layer */
   return {
-    id: Base64.encode(layer.id),
+    id: Base64.encode(upstreamId),
     name: layer.name,
     topic: layer.topic
   }
