@@ -1,5 +1,5 @@
 import { roomStateReducer, wrap } from "./convenience.mjs"
-// import { powerlevel, SCOPE as POWERLEVEL_SCOPE } from "./powerlevel.mjs"
+import { ROOM_TYPE } from "./shared.mjs"
 import * as power from './powerlevel.mjs'
 
 
@@ -45,6 +45,10 @@ ProjectList.prototype.share = async function (projectId, name, description) {
   const result = await this.structureAPI.createProject(projectId, name, description)
   this.wellKnown.set(result.globalId, result.localId)
   this.wellKnown.set(result.localId, result.globalId)
+
+  const assemblyRoom = await this.structureAPI.createWellKnownRoom(ROOM_TYPE.WELLKNOWN.ASSEMBLY)
+  await this.structureAPI.addLayerToProject(result.globalId, assemblyRoom.globalId, true) // suggested!
+
   return {
     id: projectId,
     upstreamId: result.globalId,
@@ -75,6 +79,20 @@ ProjectList.prototype.joined = async function () {
 ProjectList.prototype.join = async function (projectId) {
   const upstreamId = this.wellKnown.get(projectId)
   await this.structureAPI.join(upstreamId)
+
+  const project = await this.structureAPI.project(upstreamId)
+  console.dir(project.candidates)
+
+  const autoJoinTypes = Object.values(ROOM_TYPE.WELLKNOWN).map(wk => wk.fqn)
+  const wellkown = project.candidates
+    .filter(room => autoJoinTypes.includes(room.type))
+    .map(room => room.id)   
+
+  const joinWellknownResult = await Promise.all(
+    wellkown.map(globalId => this.structureAPI.join(globalId))
+  )
+  console.dir(joinWellknownResult)
+
   return {
     id: projectId,
     upstreamId

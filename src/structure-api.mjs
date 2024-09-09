@@ -1,14 +1,9 @@
+import { randomUUID } from 'crypto'
 import { roomStateReducer } from './convenience.mjs'
 import * as power from './powerlevel.mjs'
 
-/**
- * @readonly
- * @enum {string}
- */
-const ROOM_TYPE = {
-  LAYER: 'layer',
-  PROJECT: 'project'
-}
+import { ROOM_TYPE } from './shared.mjs'
+
 
 /**
  * @typedef {string} MatrixRoomId - #rrrr:home_server
@@ -136,11 +131,8 @@ class StructureAPI {
    */
   async project (globalId) {
     const hierarchy = await this.httpAPI.getRoomHierarchy(globalId)
-
-    // const space = hierarchy.rooms.find(room => room.room_type === 'm.space')
     
-    const layerRoomIds = hierarchy.rooms
-      // .filter(room => room.room_type === 'io.syncpoint.odin.layer')
+    const allRoomIds = hierarchy.rooms
       .map(room => room.room_id)
 
     const filter = {
@@ -152,7 +144,7 @@ class StructureAPI {
           lazy_load_members: true,  // improve performance
           not_types: [ '*' ]        // don't care about timeline
         },
-        rooms: layerRoomIds,
+        rooms: allRoomIds,
         ephemeral: {
           not_types: [ '*' ]
         }
@@ -161,11 +153,11 @@ class StructureAPI {
     const state = await this.httpAPI.sync(undefined, filter, 0)
     
     const layers = {}
+    const wellknown = {}
     let space = undefined
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
-      if (!layerRoomIds.includes(roomId)) continue
+      if (!allRoomIds.includes(roomId)) continue
       const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
-      
       const scope = (roomId === globalId) 
                     ? power.SCOPE.PROJECT
                     : power.SCOPE.LAYER
@@ -175,6 +167,8 @@ class StructureAPI {
       if (roomId === globalId) // space!
       {
         space = room
+      } else if (room.type === ROOM_TYPE.WELLKNOWN.ASSEMBLY.fqn) {
+        wellknown[roomId] = room
       } else {
         layers[roomId] = room
       }      
@@ -186,16 +180,17 @@ class StructureAPI {
       So every layer that is listed in the hierarchy but is not part of the layers joined must be a candidate that may be joined.
     */
 
-    const candidateIds = layerRoomIds.filter(roomId => (layers[roomId] === undefined))
+    const candidateIds = allRoomIds.filter(roomId => (layers[roomId] === undefined))
     const candidates = hierarchy.rooms
                         .filter(room => room.room_id !== globalId)
                         .filter(room => candidateIds.includes(room.room_id))
                         .map(room => ({
                           id: room.room_id,
                           name: room.name,
-                          topic: room.topic
+                          topic: room.topic,
+                          type: room.room_type
                         }))
-    
+
 
     const project = {
       name: space.name,
@@ -204,6 +199,7 @@ class StructureAPI {
       topic: space.topic,
       candidates, // invitations
       layers,
+      wellknown
     }    
 
     return project
@@ -277,7 +273,7 @@ class StructureAPI {
       globalId,
       friendlyName,
       /** @type {ROOM_TYPE} */
-      type: ROOM_TYPE.PROJECT,
+      type: ROOM_TYPE.PROJECT.type,
       powerlevel: {
         self: power.ROLES.LAYER.OWNER,
         default: defaultUserRole
@@ -285,20 +281,29 @@ class StructureAPI {
     }
   }
 
+  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER) {
+    return this.__createRoom(localId, friendlyName, description, ROOM_TYPE.LAYER, defaultUserRole)
+  }
+
+  async createWellKnownRoom (roomType) {
+    const localId = `wellknown+${roomType.type}:${randomUUID()}`
+    return this.__createRoom(localId, roomType.name ?? roomType.type, '', roomType, power.ROLES.LAYER.CONTRIBUTOR)
+  }
+
   /**
-   * 
+   * @private
    * @param {string} localId - This id will be used as a canonical_alias. Other instances joining the layer will use this id
    *                            as its local db key for the project.
    * @param {string} friendlyName - This name will be shown in the "layer" scope.
    * @returns 
    */
-  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER) {
+  async __createRoom (localId, friendlyName, description, roomType, defaultUserRole) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
       visibility: 'private',
       creation_content: {
-        type: 'io.syncpoint.odin.layer',
+        type: roomType.fqn,
         'io.syncpoint.odin.id': localId
       },
       initial_state: [
@@ -352,7 +357,7 @@ class StructureAPI {
       globalId,
       friendlyName,
       /** @type {ROOM_TYPE} */
-      type: ROOM_TYPE.LAYER,
+      type: roomType.type,
       powerlevel: {
         self: power.ROLES.LAYER.OWNER,
         default: defaultUserRole
@@ -365,11 +370,11 @@ class StructureAPI {
    * @param {MatrixRoomId} globalProjectId 
    * @param {MatrixRoomId} globalLayerId 
    */
-  async addLayerToProject (globalProjectId, globalLayerId) {
+  async addLayerToProject (globalProjectId, globalLayerId, suggested = false) {
 
     const childOptions = {
       auto_join: false,
-      suggested: false,
+      suggested,
       via: [
         this.httpAPI.credentials.home_server
       ]
