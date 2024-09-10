@@ -2,11 +2,14 @@
 import { Base64 } from 'js-base64'
 import { wrap } from './convenience.mjs'
 import * as power from './powerlevel.mjs'
+import { ROOM_TYPE } from './shared.mjs'
 
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
+const ODINv2_BOT_MESSAGE_TYPE = 'io.syncpoint.odin.message'
 const M_SPACE_CHILD = 'm.space.child'
 const M_ROOM_NAME = 'm.room.name'
 const M_ROOM_POWER_LEVELS = 'm.room.power_levels'
+const M_ROOM_MEMBER = 'm.room.member'
 
 /*  The max. event size for a matrix event is 64k
     see https://spec.matrix.org/v1.6/client-server-api/#size-limits
@@ -65,6 +68,9 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   Object.values(hierarchy.layers).forEach(layer => {
     this.wellKnown.remember(layer.room_id, layer.id)
   })
+  Object.values(hierarchy.wellknown).forEach(wellknownRoom => {
+    this.wellKnown.remember(wellknownRoom.room_id, wellknownRoom.id)
+  })
 
   const projectStructure = {
     id,
@@ -83,6 +89,11 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
         default: layer.powerlevel.default.name
       },
       topic: layer.topic      
+    })),
+    wellknownRooms: Object.values(hierarchy.wellknown).map(wellknownRoom => ({
+      creator: wellknownRoom.creator,
+      id: wellknownRoom.id,
+      name: wellknownRoom.name      
     })),
     invitations: hierarchy.candidates.map(candidate => ({
       id: Base64.encode(candidate.id),
@@ -178,6 +189,14 @@ Project.prototype.content = async function (layerId) {
 }
 
 Project.prototype.post = async function (layerId, operations) {
+  this.__post(layerId, operations, ODINv2_MESSAGE_TYPE)
+}
+
+Project.prototype.postToAssembly = async function (operations) {
+  this.__post(ROOM_TYPE.WELLKNOWN.ASSEMBLY.type, operations, ODINv2_BOT_MESSAGE_TYPE)
+}
+
+Project.prototype.__post = async function (layerId, operations, messageType) {
 
   const split = ops => {
     const content = encode(ops)
@@ -199,7 +218,7 @@ Project.prototype.post = async function (layerId, operations) {
   const parts = collect(chunks)
 
   const upstreamId = this.wellKnown.get(layerId)
-  parts.forEach(part => this.commandAPI.schedule(['sendMessageEvent', upstreamId, ODINv2_MESSAGE_TYPE, { content: encode(part) }]))
+  parts.forEach(part => this.commandAPI.schedule(['sendMessageEvent', upstreamId, messageType, { content: encode(part) }]))
 }
 
 Project.prototype.start = async function (streamToken, handler = {}) {
@@ -216,7 +235,9 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       M_ROOM_NAME,
       M_ROOM_POWER_LEVELS,
       M_SPACE_CHILD,
-      ODINv2_MESSAGE_TYPE
+      M_ROOM_MEMBER,
+      ODINv2_MESSAGE_TYPE,
+      ODINv2_BOT_MESSAGE_TYPE
     ]
 
     const filter = { 
@@ -243,7 +264,10 @@ Project.prototype.start = async function (streamToken, handler = {}) {
   const isChildAdded = events => events.some(event => event.type === M_SPACE_CHILD)
   const isLayerRenamed = events => events.some(event => event.type === M_ROOM_NAME)
   const isPowerlevelChanged = events => events.some(event => event.type === M_ROOM_POWER_LEVELS)
+  const isMembershipChanged = events => events.some(event => event.type === M_ROOM_MEMBER)
+
   const isODINOperation = events => events.some(event => event.type === ODINv2_MESSAGE_TYPE)
+  const isODINBotMessage = events => events.some(event => event.type === ODINv2_BOT_MESSAGE_TYPE)
 
 
   const streamHandler = wrap(handler)
@@ -313,6 +337,29 @@ Project.prototype.start = async function (streamToken, handler = {}) {
             }           
           })
         await streamHandler.roleChanged(role)
+      }
+
+      if (isMembershipChanged(content)) {
+        const membership = content
+          .filter(event => event.type === M_ROOM_MEMBER)
+          .map(event => ({
+            id: this.wellKnown.get(roomId),
+            membership: event.content.membership,
+            subject: event.state_key
+          }))
+        await streamHandler.membershipChanged(membership)
+      }
+
+      if (isODINBotMessage(content)) {
+        const message = content
+          .filter(event => event.type === ODINv2_BOT_MESSAGE_TYPE)
+          .map(event => JSON.parse(Base64.decode(event.content.content)))
+          .flat()        
+          
+        await streamHandler.receivedBot({
+          id: this.wellKnown.get(roomId),
+          message
+        })
       }
       
       if (isODINOperation(content)) {

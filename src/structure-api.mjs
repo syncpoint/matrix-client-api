@@ -286,8 +286,7 @@ class StructureAPI {
   }
 
   async createWellKnownRoom (roomType) {
-    const localId = `wellknown+${roomType.type}:${randomUUID()}`
-    return this.__createRoom(localId, roomType.name ?? roomType.type, '', roomType, power.ROLES.LAYER.CONTRIBUTOR)
+    return this.__createRoom(roomType.type, roomType.name ?? roomType.type, '', roomType, null)
   }
 
   /**
@@ -321,8 +320,11 @@ class StructureAPI {
           },
           state_key: ''
         }
-      ],
-      power_level_content_override: 
+      ]      
+    }
+
+    if (defaultUserRole) {
+      creationOptions.power_level_content_override =
       {
         'users_default': defaultUserRole.powerlevel,
         'users': {},
@@ -346,8 +348,11 @@ class StructureAPI {
         'invite': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
         'historical': power.ROLES.LAYER.READER.powerlevel
       }
+
+      creationOptions.power_level_content_override.users[this.httpAPI.credentials.user_id] = power.ROLES.LAYER.OWNER.powerlevel
     }
-    creationOptions.power_level_content_override.users[this.httpAPI.credentials.user_id] = power.ROLES.LAYER.OWNER.powerlevel
+
+    
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
