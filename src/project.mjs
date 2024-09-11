@@ -27,12 +27,12 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
 
-  this.wellKnown = new Map()
-  this.wellKnown.remember = function (upstream, downstream) {
+  this.idMapping = new Map()
+  this.idMapping.remember = function (upstream, downstream) {
     this.set(upstream, downstream)
     this.set(downstream, upstream)
   }
-  this.wellKnown.forget = function (key) {
+  this.idMapping.forget = function (key) {
     this.delete(key)
   }
 }
@@ -64,12 +64,12 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   this.commandAPI.run()
 
   this.projectId = id
-  this.wellKnown.remember(id, upstreamId)
+  this.idMapping.remember(id, upstreamId)
   Object.values(hierarchy.layers).forEach(layer => {
-    this.wellKnown.remember(layer.room_id, layer.id)
+    this.idMapping.remember(layer.room_id, layer.id)
   })
   Object.values(hierarchy.wellknown).forEach(wellknownRoom => {
-    this.wellKnown.remember(wellknownRoom.room_id, wellknownRoom.id)
+    this.idMapping.remember(wellknownRoom.room_id, wellknownRoom.id)
   })
 
   const projectStructure = {
@@ -106,14 +106,14 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
 }
 
 Project.prototype.shareLayer = async function (layerId, name, description) {
-  if (this.wellKnown.get(layerId)) {
+  if (this.idMapping.get(layerId)) {
     /* layer is already shared */
     return
   }
   const layer = await this.structureAPI.createLayer(layerId, name, description)
   
-  await this.structureAPI.addLayerToProject(this.wellKnown.get(this.projectId), layer.globalId)
-  this.wellKnown.remember(layerId, layer.globalId)
+  await this.structureAPI.addLayerToProject(this.idMapping.get(this.projectId), layer.globalId)
+  this.idMapping.remember(layerId, layer.globalId)
 
   return {
     id: layerId,
@@ -127,11 +127,11 @@ Project.prototype.shareLayer = async function (layerId, name, description) {
 
 Project.prototype.joinLayer = async function (layerId) {
   
-  const upstreamId = this.wellKnown.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
+  const upstreamId = this.idMapping.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
   
   await this.structureAPI.join(upstreamId)
   const room = await this.structureAPI.getLayer(upstreamId)  
-  this.wellKnown.remember(room.id, room.room_id)
+  this.idMapping.remember(room.id, room.room_id)
   const layer = {...room}
   layer.role = {
     self: room.powerlevel.self.name,
@@ -142,12 +142,12 @@ Project.prototype.joinLayer = async function (layerId) {
 }
 
 Project.prototype.leaveLayer = async function (layerId) {
-  const upstreamId = this.wellKnown.get(layerId)
+  const upstreamId = this.idMapping.get(layerId)
   const layer = await this.structureAPI.getLayer(upstreamId)
 
   await this.structureAPI.leave(upstreamId)
-  this.wellKnown.forget(layerId)
-  this.wellKnown.forget(upstreamId)
+  this.idMapping.forget(layerId)
+  this.idMapping.forget(upstreamId)
 
   /* an invitation to re-join the layer */
   return {
@@ -158,12 +158,12 @@ Project.prototype.leaveLayer = async function (layerId) {
 }
 
 Project.prototype.setLayerName = async function (layerId, name) {
-  const upstreamId = this.wellKnown.get(layerId)
+  const upstreamId = this.idMapping.get(layerId)
   return this.structureAPI.setName(upstreamId, name)
 }
 
 Project.prototype.setDefaultRole = async function (layerId, role) {
-  const upstreamId = this.wellKnown.get(layerId)
+  const upstreamId = this.idMapping.get(layerId)
   const powerlevel = power.ROLES.LAYER[role]
   return this.structureAPI.setDefaultPowerlevel(upstreamId, powerlevel)
 }
@@ -178,7 +178,7 @@ Project.prototype.content = async function (layerId) {
       not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
     }
 
-  const upstreamId = this.wellKnown.get(layerId)
+  const upstreamId = this.idMapping.get(layerId)
   const content = await this.timelineAPI.content(upstreamId, filter)
   const operations = content.events
     .map(event => 
@@ -192,8 +192,8 @@ Project.prototype.post = async function (layerId, operations) {
   this.__post(layerId, operations, ODINv2_MESSAGE_TYPE)
 }
 
-Project.prototype.postToAssembly = async function (operations) {
-  this.__post(ROOM_TYPE.WELLKNOWN.ASSEMBLY.type, operations, ODINv2_EXTENSION_MESSAGE_TYPE)
+Project.prototype.postToExtension = async function (operations) {
+  this.__post(ROOM_TYPE.WELLKNOWN.EXTENSION.type, operations, ODINv2_EXTENSION_MESSAGE_TYPE)
 }
 
 Project.prototype.__post = async function (layerId, operations, messageType) {
@@ -217,7 +217,7 @@ Project.prototype.__post = async function (layerId, operations, messageType) {
   const chunks = split(operations)
   const parts = collect(chunks)
 
-  const upstreamId = this.wellKnown.get(layerId)
+  const upstreamId = this.idMapping.get(layerId)
   parts.forEach(part => this.commandAPI.schedule(['sendMessageEvent', upstreamId, messageType, { content: encode(part) }]))
 }
 
@@ -250,7 +250,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           limit: 1000, 
           types: EVENT_TYPES, 
           not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
-          rooms: Array.from(this.wellKnown.keys()).filter(key => key.startsWith('!'))
+          rooms: Array.from(this.idMapping.keys()).filter(key => key.startsWith('!'))
         },
         ephemeral: {
           not_types: [ '*' ]
@@ -315,7 +315,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           .filter(event => event.type === M_ROOM_NAME)
           .map(event => (
             {
-              id: this.wellKnown.get(roomId),
+              id: this.idMapping.get(roomId),
               name: event.content.name
             }
           ))
@@ -329,7 +329,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           .map(event => {
             const powerlevel = power.powerlevel(this.timelineAPI.credentials().user_id, event.content)
             return {
-              id: this.wellKnown.get(roomId),
+              id: this.idMapping.get(roomId),
               role: {
                 self: powerlevel.self.name,
                 default: powerlevel.default.name 
@@ -343,7 +343,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         const membership = content
           .filter(event => event.type === M_ROOM_MEMBER)
           .map(event => ({
-            id: this.wellKnown.get(roomId),
+            id: this.idMapping.get(roomId),
             membership: event.content.membership,
             subject: event.state_key
           }))
@@ -357,7 +357,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           .flat()        
           
         await streamHandler.receivedExtension({
-          id: this.wellKnown.get(roomId),
+          id: this.idMapping.get(roomId),
           message
         })
       }
@@ -369,7 +369,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           .flat()
   
         await streamHandler.received({
-          id: this.wellKnown.get(roomId),
+          id: this.idMapping.get(roomId),
           operations
         }
         )

@@ -12,10 +12,10 @@ export const ROOM_TYPE = {
     fqn: 'm.space'
   },
   WELLKNOWN: {
-    ASSEMBLY: {
-      type: 'wellknown+assembly',
-      fqn: 'io.syncpoint.odin.assembly',
-      name: 'Assembly - Where all the bots assemble'
+    EXTENSION: {
+      type: 'wellknown+extension',
+      fqn: 'io.syncpoint.odin.extension',
+      name: 'Extension - A room for bots that extend ODIN'
     }
     // where all the bots assemble in the first place
   }  

@@ -46,8 +46,8 @@ ProjectList.prototype.share = async function (projectId, name, description) {
   this.wellKnown.set(result.globalId, result.localId)
   this.wellKnown.set(result.localId, result.globalId)
 
-  const assemblyRoom = await this.structureAPI.createWellKnownRoom(ROOM_TYPE.WELLKNOWN.ASSEMBLY)
-  await this.structureAPI.addLayerToProject(result.globalId, assemblyRoom.globalId, true) // suggested!
+  const extensionRoom = await this.structureAPI.createWellKnownRoom(ROOM_TYPE.WELLKNOWN.EXTENSION)
+  await this.structureAPI.addLayerToProject(result.globalId, extensionRoom.globalId, true) // suggested!
 
   return {
     id: projectId,

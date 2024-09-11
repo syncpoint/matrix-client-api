@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto'
 import { roomStateReducer } from './convenience.mjs'
 import * as power from './powerlevel.mjs'
 
@@ -167,7 +166,7 @@ class StructureAPI {
       if (roomId === globalId) // space!
       {
         space = room
-      } else if (room.type === ROOM_TYPE.WELLKNOWN.ASSEMBLY.fqn) {
+      } else if (room.type === ROOM_TYPE.WELLKNOWN.EXTENSION.fqn) {
         wellknown[roomId] = room
       } else {
         layers[roomId] = room
