@@ -5,7 +5,7 @@ import * as power from './powerlevel.mjs'
 import { ROOM_TYPE } from './shared.mjs'
 
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
-const ODINv2_BOT_MESSAGE_TYPE = 'io.syncpoint.odin.message'
+const ODINv2_EXTENSION_MESSAGE_TYPE = 'io.syncpoint.odin.extension'
 const M_SPACE_CHILD = 'm.space.child'
 const M_ROOM_NAME = 'm.room.name'
 const M_ROOM_POWER_LEVELS = 'm.room.power_levels'
@@ -193,7 +193,7 @@ Project.prototype.post = async function (layerId, operations) {
 }
 
 Project.prototype.postToAssembly = async function (operations) {
-  this.__post(ROOM_TYPE.WELLKNOWN.ASSEMBLY.type, operations, ODINv2_BOT_MESSAGE_TYPE)
+  this.__post(ROOM_TYPE.WELLKNOWN.ASSEMBLY.type, operations, ODINv2_EXTENSION_MESSAGE_TYPE)
 }
 
 Project.prototype.__post = async function (layerId, operations, messageType) {
@@ -237,7 +237,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       M_SPACE_CHILD,
       M_ROOM_MEMBER,
       ODINv2_MESSAGE_TYPE,
-      ODINv2_BOT_MESSAGE_TYPE
+      ODINv2_EXTENSION_MESSAGE_TYPE
     ]
 
     const filter = { 
@@ -267,7 +267,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
   const isMembershipChanged = events => events.some(event => event.type === M_ROOM_MEMBER)
 
   const isODINOperation = events => events.some(event => event.type === ODINv2_MESSAGE_TYPE)
-  const isODINBotMessage = events => events.some(event => event.type === ODINv2_BOT_MESSAGE_TYPE)
+  const isODINExtensionMessage = events => events.some(event => event.type === ODINv2_EXTENSION_MESSAGE_TYPE)
 
 
   const streamHandler = wrap(handler)
@@ -350,13 +350,13 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         await streamHandler.membershipChanged(membership)
       }
 
-      if (isODINBotMessage(content)) {
+      if (isODINExtensionMessage(content)) {
         const message = content
-          .filter(event => event.type === ODINv2_BOT_MESSAGE_TYPE)
+          .filter(event => event.type === ODINv2_EXTENSION_MESSAGE_TYPE)
           .map(event => JSON.parse(Base64.decode(event.content.content)))
           .flat()        
           
-        await streamHandler.receivedBot({
+        await streamHandler.receivedExtension({
           id: this.wellKnown.get(roomId),
           message
         })
