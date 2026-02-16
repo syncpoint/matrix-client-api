@@ -13,9 +13,25 @@ import { ROOM_TYPE } from './shared.mjs'
  * @description Designed for usage in ODINv2.
  * @typedef {Object} StructureAPI
  */
+const ENCRYPTION_STATE_EVENT = {
+  type: 'm.room.encryption',
+  content: {
+    algorithm: 'm.megolm.v1.aes-sha2',
+    rotation_period_ms: 604800000,
+    rotation_period_msgs: 100
+  },
+  state_key: ''
+}
+
 class StructureAPI {
-  constructor (httpAPI) {
+  /**
+   * @param {import('./http-api.mjs').HttpAPI} httpAPI
+   * @param {Object} [options]
+   * @param {boolean} [options.encryption=false] - Whether to enable E2EE for newly created rooms
+   */
+  constructor (httpAPI, options) {
     this.httpAPI = httpAPI
+    this.encryption = options?.encryption || false
   }
 
   credentials () {
@@ -264,6 +280,10 @@ class StructureAPI {
       }
     }
 
+    if (this.encryption) {
+      creationOptions.initial_state.push(ENCRYPTION_STATE_EVENT)
+    }
+
     creationOptions.power_level_content_override.users[this.httpAPI.credentials.user_id] = power.ROLES.PROJECT.OWNER.powerlevel
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
@@ -352,6 +372,10 @@ class StructureAPI {
     }
 
     
+
+    if (this.encryption) {
+      creationOptions.initial_state.push(ENCRYPTION_STATE_EVENT)
+    }
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 
