@@ -3,8 +3,15 @@ import { getLogger } from './logger.mjs'
 
 const DEFAULT_POLL_TIMEOUT = 30000
 
-const TimelineAPI = function (httpApi) {
+/**
+ * @param {import('./http-api.mjs').HttpAPI} httpApi
+ * @param {Object} [crypto] - Optional crypto context
+ * @param {import('./crypto.mjs').CryptoManager} [crypto.cryptoManager]
+ * @param {import('./http-api.mjs').HttpAPI} [crypto.httpAPI]
+ */
+const TimelineAPI = function (httpApi, crypto) {
   this.httpApi = httpApi
+  this.crypto = crypto || null
 }
 
 TimelineAPI.prototype.credentials = function () {
@@ -34,6 +41,18 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
 
   const syncResult = await this.httpApi.sync(since, filter, timeout)
 
+  // Feed crypto state from sync response
+  if (this.crypto) {
+    const { cryptoManager, httpAPI } = this.crypto
+    const toDeviceEvents = syncResult.to_device?.events || []
+    const deviceLists = syncResult.device_lists || {}
+    const oneTimeKeyCounts = syncResult.device_one_time_keys_count || {}
+    const unusedFallbackKeys = syncResult.device_unused_fallback_key_types || undefined
+
+    await cryptoManager.receiveSyncChanges(toDeviceEvents, deviceLists, oneTimeKeyCounts, unusedFallbackKeys)
+    await httpAPI.processOutgoingCryptoRequests(cryptoManager)
+  }
+
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
     if (content.timeline.events?.length === 0) continue
 
@@ -54,6 +73,29 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   catchUp.forEach(result => {
     events[result.roomId] = [...events[result.roomId], ...result.events]
   })
+
+  // Decrypt encrypted events if crypto is available
+  if (this.crypto) {
+    const { cryptoManager } = this.crypto
+    const log = getLogger()
+    for (const [roomId, roomEvents] of Object.entries(events)) {
+      for (let i = 0; i < roomEvents.length; i++) {
+        if (roomEvents[i].type === 'm.room.encrypted') {
+          const decrypted = await cryptoManager.decryptRoomEvent(roomEvents[i], roomId)
+          if (decrypted) {
+            roomEvents[i] = {
+              ...roomEvents[i],
+              type: decrypted.event.type,
+              content: decrypted.event.content,
+              decrypted: true
+            }
+          } else {
+            log.warn('Could not decrypt event in room', roomId, roomEvents[i].event_id)
+          }
+        }
+      }
+    }
+  }
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.invite || {})) {
     if (content.invite_state.events?.length === 0) continue
