@@ -22,6 +22,7 @@ function HttpAPI (credentials) {
     user_id: credentials.user_id,
     home_server: credentials.home_server,
     home_server_url: credentials.home_server_url,
+    device_id: credentials.device_id,
     refresh_token: credentials.refresh_token,
     access_token: credentials.access_token
   }
@@ -53,17 +54,22 @@ function HttpAPI (credentials) {
               throw error
             } else if (error.response.status === 401) {
               const body = await error.response.json()
-              if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
-                getLogger().error('Token refresh rejected:', body.error)
-                throw new Error(`${body.errcode}: ${body.error}`)
+              if (body.errcode === 'M_UNKNOWN_TOKEN' && this.credentials.refresh_token) {
+                getLogger().info('Access token expired, attempting refresh...')
+                try {
+                  const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
+                  this.credentials.refresh_token = tokens.refresh_token
+                  /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
+                  this.credentials.access_token = tokens.access_token
+                  if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(this.credentials)
+                  return
+                } catch (refreshError) {
+                  getLogger().error('Token refresh failed:', refreshError.message)
+                  throw new Error(`Token refresh failed: ${refreshError.message}`)
+                }
               }
-              
-              const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
-              this.credentials.refresh_token = tokens.refresh_token
-              /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
-              this.credentials.access_token = tokens.access_token
-              if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(this.credentials) // notify the outside world about the new tokens
-              return
+              getLogger().error('Authentication rejected:', body.errcode, body.error)
+              throw new Error(`${body.errcode}: ${body.error}`)
             }
           }
 

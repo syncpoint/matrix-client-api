@@ -57,7 +57,10 @@ const MatrixClient = (loginData) => {
     if (!encryption?.enabled) return null
     const cryptoManager = new CryptoManager()
     const credentials = httpAPI.credentials
-    await cryptoManager.initialize(credentials.user_id, credentials.device_id || 'ODIN_DEVICE')
+    if (!credentials.device_id) {
+      throw new Error('E2EE requires a device_id in credentials. Ensure a fresh login (delete .state.json if reusing saved credentials).')
+    }
+    await cryptoManager.initialize(credentials.user_id, credentials.device_id)
     // Process initial key upload
     await httpAPI.processOutgoingCryptoRequests(cryptoManager)
     return { cryptoManager, httpAPI }
