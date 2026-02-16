@@ -281,7 +281,7 @@ HttpAPI.prototype.joinedRooms = async function () {
 }
 
 HttpAPI.prototype.members = async function (roomId, exclude = 'leave') {
-  return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/members?not_memebership=${exclude}`).json()
+  return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/members?not_membership=${exclude}`).json()
 }
 
 HttpAPI.prototype.searchInUserDirectory = async function (term) {
