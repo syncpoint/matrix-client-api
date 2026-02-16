@@ -26,12 +26,9 @@ const ENCRYPTION_STATE_EVENT = {
 class StructureAPI {
   /**
    * @param {import('./http-api.mjs').HttpAPI} httpAPI
-   * @param {Object} [options]
-   * @param {boolean} [options.encryption=false] - Whether to enable E2EE for newly created rooms
    */
-  constructor (httpAPI, options) {
+  constructor (httpAPI) {
     this.httpAPI = httpAPI
-    this.encryption = options?.encryption || false
   }
 
   credentials () {
@@ -227,7 +224,7 @@ class StructureAPI {
    * @param {string} friendlyName - This name will be shown in the "project" view for every node that gets invited to join the project.
    * @returns 
    */
-  async createProject (localId, friendlyName, description, defaultUserRole = power.ROLES.PROJECT.CONTRIBUTOR) {
+  async createProject (localId, friendlyName, description, defaultUserRole = power.ROLES.PROJECT.CONTRIBUTOR, options = {}) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
@@ -280,7 +277,7 @@ class StructureAPI {
       }
     }
 
-    if (this.encryption) {
+    if (options.encrypted) {
       creationOptions.initial_state.push(ENCRYPTION_STATE_EVENT)
     }
 
@@ -300,12 +297,12 @@ class StructureAPI {
     }
   }
 
-  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER) {
-    return this.__createRoom(localId, friendlyName, description, ROOM_TYPE.LAYER, defaultUserRole)
+  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER, options = {}) {
+    return this.__createRoom(localId, friendlyName, description, ROOM_TYPE.LAYER, defaultUserRole, options)
   }
 
   async createWellKnownRoom (roomType) {
-    return this.__createRoom(roomType.type, roomType.name ?? roomType.type, '', roomType, null)
+    return this.__createRoom(roomType.type, roomType.name ?? roomType.type, '', roomType, null, {})
   }
 
   /**
@@ -315,7 +312,7 @@ class StructureAPI {
    * @param {string} friendlyName - This name will be shown in the "layer" scope.
    * @returns 
    */
-  async __createRoom (localId, friendlyName, description, roomType, defaultUserRole) {
+  async __createRoom (localId, friendlyName, description, roomType, defaultUserRole, options = {}) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
@@ -373,7 +370,7 @@ class StructureAPI {
 
     
 
-    if (this.encryption) {
+    if (options.encrypted) {
       creationOptions.initial_state.push(ENCRYPTION_STATE_EVENT)
     }
 

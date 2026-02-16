@@ -71,7 +71,7 @@ const MatrixClient = (loginData) => {
       const httpAPI = new HttpAPI(credentials)
       const crypto = await initCrypto(httpAPI)
       const projectListParames = {
-        structureAPI: new StructureAPI(httpAPI, { encryption: !!encryption?.enabled }),
+        structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, crypto)
       }
       const projectList = new ProjectList(projectListParames)
@@ -86,7 +86,7 @@ const MatrixClient = (loginData) => {
       const httpAPI = new HttpAPI(credentials)
       const crypto = await initCrypto(httpAPI)
       const projectParams = {
-        structureAPI: new StructureAPI(httpAPI, { encryption: !!encryption?.enabled }),
+        structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, crypto),
         commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null)
       }

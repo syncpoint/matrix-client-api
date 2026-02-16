@@ -106,12 +106,12 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   return projectStructure
 }
 
-Project.prototype.shareLayer = async function (layerId, name, description) {
+Project.prototype.shareLayer = async function (layerId, name, description, options = {}) {
   if (this.idMapping.get(layerId)) {
     /* layer is already shared */
     return
   }
-  const layer = await this.structureAPI.createLayer(layerId, name, description)
+  const layer = await this.structureAPI.createLayer(layerId, name, description, undefined, options)
   
   await this.structureAPI.addLayerToProject(this.idMapping.get(this.projectId), layer.globalId)
   this.idMapping.remember(layerId, layer.globalId)

@@ -38,12 +38,12 @@ ProjectList.prototype.hydrate = async function () {
   })
 }
 
-ProjectList.prototype.share = async function (projectId, name, description) {
+ProjectList.prototype.share = async function (projectId, name, description, options = {}) {
   if (this.wellKnown.get(projectId)) {
     /* project is already shared */
     return
   }
-  const result = await this.structureAPI.createProject(projectId, name, description)
+  const result = await this.structureAPI.createProject(projectId, name, description, undefined, options)
   this.wellKnown.set(result.globalId, result.localId)
   this.wellKnown.set(result.localId, result.globalId)
 

@@ -97,7 +97,7 @@ const HELP = `
 ║  Project List                                                ║
 ║    projects          List joined projects                     ║
 ║    invited           List project invitations                 ║
-║    share <id> <name> Share a new project                      ║
+║    share <id> <name> [--encrypted] Share a new project         ║
 ║    join <id>         Join an invited project                  ║
 ║    members <id>      List project members                     ║
 ║    invite <pid> <uid> Invite user to project                  ║
@@ -106,7 +106,7 @@ const HELP = `
 ║  Project (select first with 'open')                          ║
 ║    open <id>         Open a project by ODIN id                ║
 ║    layers            List layers in current project            ║
-║    layer-share <id> <name>  Share a new layer                 ║
+║    layer-share <id> <name> [--encrypted] Share a new layer     ║
 ║    layer-join <id>   Join a layer                             ║
 ║    layer-content <id> Get layer content (operations)          ║
 ║    post <lid> <json> Post operations to a layer               ║
@@ -219,11 +219,14 @@ const commands = {
 
   share: async (args) => {
     if (!projectList) return print('❌ Not logged in')
-    const [id, ...nameParts] = args
-    if (!id || nameParts.length === 0) return print('Usage: share <odin-id> <name>')
+    const encrypted = args.includes('--encrypted')
+    const filtered = args.filter(a => a !== '--encrypted')
+    const [id, ...nameParts] = filtered
+    if (!id || nameParts.length === 0) return print('Usage: share <odin-id> <name> [--encrypted]')
     const name = nameParts.join(' ')
-    print(`📤 Sharing project "${name}" (${id})...`)
-    const result = await projectList.share(id, name)
+    const options = encrypted ? { encrypted: true } : {}
+    print(`📤 Sharing project "${name}" (${id})${encrypted ? ' [E2EE]' : ''}...`)
+    const result = await projectList.share(id, name, undefined, options)
     printJSON(result)
   },
 
@@ -308,11 +311,14 @@ const commands = {
 
   'layer-share': async (args) => {
     if (!project) return print('❌ No project open')
-    const [id, ...nameParts] = args
-    if (!id || nameParts.length === 0) return print('Usage: layer-share <layer-id> <name>')
+    const encrypted = args.includes('--encrypted')
+    const filtered = args.filter(a => a !== '--encrypted')
+    const [id, ...nameParts] = filtered
+    if (!id || nameParts.length === 0) return print('Usage: layer-share <layer-id> <name> [--encrypted]')
     const name = nameParts.join(' ')
-    print(`📤 Sharing layer "${name}"...`)
-    const result = await project.shareLayer(id, name)
+    const options = encrypted ? { encrypted: true } : {}
+    print(`📤 Sharing layer "${name}"${encrypted ? ' [E2EE]' : ''}...`)
+    const result = await project.shareLayer(id, name, undefined, options)
     printJSON(result)
   },
 
