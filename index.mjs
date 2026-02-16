@@ -7,6 +7,7 @@ import { Project } from './src/project.mjs'
 import { discover, errors } from './src/discover-api.mjs'
 import { setLogger, LEVELS, consoleLogger, noopLogger } from './src/logger.mjs'
 import { chill } from './src/convenience.mjs'
+import { CryptoManager } from './src/crypto.mjs'
 
 /*
   connect() resolves if the home_server can be connected. It does
@@ -37,45 +38,70 @@ const connect = (home_server_url) => async (controller) => {
  * @property {String} user_id
  * @property {String} password
  * @property {String} home_server_url
+ * @property {Object} [encryption] - Optional encryption configuration
+ * @property {boolean} [encryption.enabled=false] - Enable E2EE
  * 
  * @param {LoginData} loginData 
  * @returns {Object} matrixClient
  */
-const MatrixClient = (loginData) => ({
+const MatrixClient = (loginData) => {
 
-  connect: connect(loginData.home_server_url),
-  
-  projectList: async mostRecentCredentials => {
-    
-    const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
-    const httpAPI = new HttpAPI(credentials)
-    const projectListParames = {
-      structureAPI: new StructureAPI(httpAPI),
-      timelineAPI: new TimelineAPI(httpAPI)
-    }
-    const projectList = new ProjectList(projectListParames)
-    projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
-    projectList.credentials = () => (httpAPI.credentials)
-    return projectList
-  },
+  const encryption = loginData.encryption || null
 
-  project: async mostRecentCredentials => {
-    const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
-    const httpAPI = new HttpAPI(credentials)
-    const projectParams = {
-      structureAPI: new StructureAPI(httpAPI),
-      timelineAPI: new TimelineAPI(httpAPI),
-      commandAPI: new CommandAPI(httpAPI)
-    }
-    const project = new Project(projectParams)
-    project.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
-    project.credentials = () => (httpAPI.credentials)
-    return project
+  /**
+   * Initialize the CryptoManager if encryption is enabled.
+   * @param {HttpAPI} httpAPI
+   * @returns {Promise<{cryptoManager: CryptoManager, httpAPI: HttpAPI} | null>}
+   */
+  const initCrypto = async (httpAPI) => {
+    if (!encryption?.enabled) return null
+    const cryptoManager = new CryptoManager()
+    const credentials = httpAPI.credentials
+    await cryptoManager.initialize(credentials.user_id, credentials.device_id || 'ODIN_DEVICE')
+    // Process initial key upload
+    await httpAPI.processOutgoingCryptoRequests(cryptoManager)
+    return { cryptoManager, httpAPI }
   }
-})
+
+  return {
+    connect: connect(loginData.home_server_url),
+  
+    projectList: async mostRecentCredentials => {
+      const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
+      const httpAPI = new HttpAPI(credentials)
+      const crypto = await initCrypto(httpAPI)
+      const projectListParames = {
+        structureAPI: new StructureAPI(httpAPI, { encryption: !!encryption?.enabled }),
+        timelineAPI: new TimelineAPI(httpAPI, crypto)
+      }
+      const projectList = new ProjectList(projectListParames)
+      projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+      projectList.credentials = () => (httpAPI.credentials)
+      if (crypto) projectList.cryptoManager = crypto.cryptoManager
+      return projectList
+    },
+
+    project: async mostRecentCredentials => {
+      const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
+      const httpAPI = new HttpAPI(credentials)
+      const crypto = await initCrypto(httpAPI)
+      const projectParams = {
+        structureAPI: new StructureAPI(httpAPI, { encryption: !!encryption?.enabled }),
+        timelineAPI: new TimelineAPI(httpAPI, crypto),
+        commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null)
+      }
+      const project = new Project(projectParams)
+      project.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
+      project.credentials = () => (httpAPI.credentials)
+      if (crypto) project.cryptoManager = crypto.cryptoManager
+      return project
+    }
+  }
+}
 
 export {
   MatrixClient,
+  CryptoManager,
   connect,
   discover,
   setLogger,
