@@ -1,4 +1,5 @@
 import { FIFO } from './queue.mjs'
+import { getLogger } from './logger.mjs'
 
 class CommandAPI {
   constructor (httpAPI) {
@@ -49,19 +50,20 @@ class CommandAPI {
         functionCall = await this.scheduledCalls.dequeue()
         const [functionName, ...params] = functionCall        
         await this.httpAPI[functionName].apply(this.httpAPI, params)
-        console.log('SUCCESS', functionName, params)
+        const log = getLogger()
+        log.debug('Command sent:', functionName)
         retryCounter = 0
       } catch (error) {
-        console.log('ERROR', error.message)
+        const log = getLogger()
+        log.warn('Command failed:', error.message)
         if (error.response?.statusCode === 403) {
-          console.error(`Calling ${functionCall[0]} is forbidden: ${error.response.body}`)
+          log.error('Command forbidden:', functionCall[0], error.response.body)
         }
         
         /*
           In most cases we will have to deal with socket errors. The users computer may
           be offline or the server might be unreachable.
         */
-        console.log(`Error: ${error.message}`)
         this.scheduledCalls.requeue(functionCall)
         retryCounter++
       }

@@ -5,6 +5,7 @@ import { CommandAPI } from './src/command-api.mjs'
 import { ProjectList } from './src/project-list.mjs'
 import { Project } from './src/project.mjs'
 import { discover, errors } from './src/discover-api.mjs'
+import { setLogger, LEVELS, consoleLogger, noopLogger } from './src/logger.mjs'
 import { chill } from './src/convenience.mjs'
 
 /*
@@ -76,5 +77,9 @@ const MatrixClient = (loginData) => ({
 export {
   MatrixClient,
   connect,
-  discover
+  discover,
+  setLogger,
+  LEVELS,
+  consoleLogger,
+  noopLogger
 }

@@ -1,4 +1,5 @@
 import { roomStateReducer, wrap } from "./convenience.mjs"
+import { getLogger } from './logger.mjs'
 import { ROOM_TYPE } from "./shared.mjs"
 import * as power from './powerlevel.mjs'
 
@@ -81,7 +82,7 @@ ProjectList.prototype.join = async function (projectId) {
   await this.structureAPI.join(upstreamId)
 
   const project = await this.structureAPI.project(upstreamId)
-  console.dir(project.candidates)
+  getLogger().debug('Join candidates:', project.candidates.length)
 
   const autoJoinTypes = Object.values(ROOM_TYPE.WELLKNOWN).map(wk => wk.fqn)
   const wellkown = project.candidates
@@ -91,7 +92,7 @@ ProjectList.prototype.join = async function (projectId) {
   const joinWellknownResult = await Promise.all(
     wellkown.map(globalId => this.structureAPI.join(globalId))
   )
-  console.dir(joinWellknownResult)
+  getLogger().debug('Joined wellknown rooms:', joinWellknownResult.length)
 
   return {
     id: projectId,

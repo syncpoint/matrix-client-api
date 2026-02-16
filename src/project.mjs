@@ -1,5 +1,6 @@
 
 import { Base64 } from 'js-base64'
+import { getLogger } from './logger.mjs'
 import { wrap } from './convenience.mjs'
 import * as power from './powerlevel.mjs'
 import { ROOM_TYPE } from './shared.mjs'
@@ -299,7 +300,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         const project = await this.structureAPI.project(roomId)
         const childRoom = project.candidates.find(room => room.id === childEvent.state_key)
         if (!childRoom) {
-          console.warn('Received m.space.child event but did not find new child room')
+          getLogger().warn('Received m.space.child but child room not found')
           return
         }
         

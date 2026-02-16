@@ -1,4 +1,5 @@
 import { powerlevel } from "./powerlevel.mjs"
+import { getLogger } from './logger.mjs'
 
 const effectiveFilter = filter => {
   if (!filter) return
@@ -66,7 +67,7 @@ const roomStateReducer = (acc, event) => {
 const wrap = handler => {
   const proxyHandler = {
     get (target, property) {
-      return (property in target && typeof target[property] === 'function') ? target[property] : () => console.error(`HANDLER does not handle ${property}`)
+      return (property in target && typeof target[property] === 'function') ? target[property] : () => getLogger().warn('Unhandled stream event:', property)
     }
   }
   return new Proxy(handler, proxyHandler)

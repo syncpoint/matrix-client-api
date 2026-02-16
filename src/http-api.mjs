@@ -2,6 +2,7 @@
 import ky, { HTTPError } from 'ky'
 import { randomUUID } from 'crypto'
 import { effectiveFilter, roomStateReducer } from './convenience.mjs'
+import { getLogger } from './logger.mjs'
 
 const POLL_TIMEOUT = 30000
 const RETRY_LIMIT = 2
@@ -52,7 +53,7 @@ function HttpAPI (credentials) {
             } else if (error.response.status === 401) {
               const body = await error.response.json()
               if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
-                console.error('MATRIX server does not like us anymore :-(', body.error)
+                getLogger().error('Token refresh rejected:', body.error)
                 throw new Error(`${body.errcode}: ${body.error}`)
               }
               
@@ -129,7 +130,7 @@ HttpAPI.login = async function (homeServerUrl, options) {
             type: response.type,
             url: response.url
           })
-          console.log(`Retrying at ${(new Date(Date.now() + retryAfter)).toISOString()}`)
+          getLogger().info(`Rate limited, retrying at ${(new Date(Date.now() + retryAfter)).toISOString()}`)
           return retryAfterResponse          
 
         }

@@ -1,4 +1,5 @@
 import { chill } from './convenience.mjs'
+import { getLogger } from './logger.mjs'
 
 const DEFAULT_POLL_TIMEOUT = 30000
 
@@ -11,7 +12,7 @@ TimelineAPI.prototype.credentials = function () {
 }
 
 TimelineAPI.prototype.content = async function (roomId, filter, from) {
-  console.dir(filter, { depth: 5 })
+  getLogger().debug('Timeline content filter:', JSON.stringify(filter))
 
   return this.catchUp(roomId, null, null, 'f', filter)
 }
