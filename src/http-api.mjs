@@ -3,6 +3,7 @@ import ky, { HTTPError } from 'ky'
 import { randomUUID } from 'crypto'
 import { effectiveFilter, roomStateReducer } from './convenience.mjs'
 import { getLogger } from './logger.mjs'
+import { RequestType } from './crypto.mjs'
 
 const POLL_TIMEOUT = 30000
 const RETRY_LIMIT = 2
@@ -383,6 +384,83 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT) 
   return this.client.get('v3/sync', {
     searchParams: buildSearchParams(since, filter, timeout)
   }).json()
+}
+
+/**
+ * Execute an outgoing crypto request against the appropriate Matrix endpoint.
+ * @param {Object} request - An outgoing request from OlmMachine (KeysUpload, KeysQuery, KeysClaim, ToDevice, SignatureUpload, RoomMessage)
+ * @returns {string} JSON-encoded response body
+ */
+HttpAPI.prototype.sendOutgoingCryptoRequest = async function (request) {
+  const log = getLogger()
+  const body = request.body
+
+  switch (request.type) {
+    case RequestType.KeysUpload: {
+      log.debug('Sending keys/upload request')
+      const response = await this.client.post('v3/keys/upload', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.KeysQuery: {
+      log.debug('Sending keys/query request')
+      const response = await this.client.post('v3/keys/query', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.KeysClaim: {
+      log.debug('Sending keys/claim request')
+      const response = await this.client.post('v3/keys/claim', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.ToDevice: {
+      const eventType = request.event_type
+      const txnId = request.txn_id
+      log.debug('Sending to-device request:', eventType)
+      const response = await this.client.put(
+        `v3/sendToDevice/${encodeURIComponent(eventType)}/${encodeURIComponent(txnId)}`,
+        { body, headers: { 'Content-Type': 'application/json' } }
+      ).text()
+      return response
+    }
+
+    case RequestType.SignatureUpload: {
+      log.debug('Sending signature upload request')
+      const response = await this.client.post('v3/keys/signatures/upload', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.RoomMessage: {
+      const roomId = request.room_id
+      const eventType = request.event_type
+      const txnId = request.txn_id
+      log.debug('Sending room message request:', eventType, 'to', roomId)
+      const content = JSON.parse(body)
+      const result = await this.sendMessageEvent(roomId, eventType, content, txnId)
+      return JSON.stringify(result)
+    }
+
+    default:
+      log.warn('Unknown outgoing request type:', request.type)
+      return '{}'
+  }
+}
+
+/**
+ * Process all outgoing requests from the CryptoManager.
+ * @param {import('./crypto.mjs').CryptoManager} cryptoManager
+ */
+HttpAPI.prototype.processOutgoingCryptoRequests = async function (cryptoManager) {
+  const requests = await cryptoManager.outgoingRequests()
+  for (const request of requests) {
+    try {
+      const response = await this.sendOutgoingCryptoRequest(request)
+      await cryptoManager.markRequestAsSent(request.id, request.type, response)
+    } catch (error) {
+      getLogger().error('Failed to process outgoing crypto request:', error.message)
+    }
+  }
 }
 
 export {
