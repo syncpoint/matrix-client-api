@@ -111,6 +111,7 @@ const HELP = `
 ║    layer-join <id>   Join a layer                             ║
 ║    layer-content <id> Get layer content (operations)          ║
 ║    post <lid> <json> Post operations to a layer               ║
+║    send <lid> <text> Send plain m.room.message (for testing) ║
 ║                                                              ║
 ║  Streaming                                                   ║
 ║    listen            Start listening for project changes       ║
@@ -352,6 +353,20 @@ const commands = {
     } catch (e) {
       print('❌ Invalid JSON:', e.message)
     }
+  },
+
+  send: async (args) => {
+    if (!project) return print('❌ No project open')
+    const [layerId, ...textParts] = args
+    if (!layerId || textParts.length === 0) return print('Usage: send <layer-id> <text message>')
+    const text = textParts.join(' ')
+    const upstreamId = project.idMapping.get(layerId)
+    if (!upstreamId) return print(`❌ Layer "${layerId}" not found in current project`)
+    
+    // Send a plain m.room.message event directly through the command queue
+    const content = { msgtype: 'm.text', body: text }
+    project.commandAPI.schedule(['sendMessageEvent', upstreamId, 'm.room.message', content])
+    print(`📨 Sending message to ${layerId}: "${text}"`)
   },
 
   listen: async () => {
