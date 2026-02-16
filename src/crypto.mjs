@@ -157,6 +157,17 @@ class CryptoManager {
   }
 
   /**
+   * Explicitly query device keys for users.
+   * Returns a KeysQueryRequest that must be sent via HTTP.
+   * @param {string[]} userIds
+   * @returns {Object|undefined} KeysQueryRequest or undefined
+   */
+  async queryKeysForUsers (userIds) {
+    if (!this.olmMachine) return undefined
+    return this.olmMachine.queryKeysForUsers(userIds.map(id => new UserId(id)))
+  }
+
+  /**
    * Register a room as encrypted with the OlmMachine.
    * Must be called when a room with m.room.encryption state is discovered.
    * @param {string} roomId

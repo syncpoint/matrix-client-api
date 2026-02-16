@@ -58,31 +58,53 @@ class CommandAPI {
         // Encrypt outgoing message events if crypto is available
         if (this.cryptoManager && functionName === 'sendMessageEvent') {
           const [roomId, eventType, content, ...rest] = params
+          const log = getLogger()
           try {
-            // Ensure room keys are shared before encrypting
+            // 1. Get room members
             const members = await this.httpAPI.members(roomId)
             const memberIds = (members.chunk || [])
-              .filter(e => e.membership === 'join')
-              .map(e => e.state_key || e.sender)
+              .filter(e => e.content?.membership === 'join')
+              .map(e => e.state_key)
+              .filter(Boolean)
+            log.debug('E2EE: room members:', memberIds)
+
+            // 2. Track users and explicitly query their device keys
             await this.cryptoManager.updateTrackedUsers(memberIds)
+            const keysQueryRequest = await this.cryptoManager.queryKeysForUsers(memberIds)
+            if (keysQueryRequest) {
+              log.debug('E2EE: querying device keys for', memberIds.length, 'users')
+              const queryResponse = await this.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
+              await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
+            }
+
+            // 3. Process any other pending outgoing requests
             await this.httpAPI.processOutgoingCryptoRequests(this.cryptoManager)
 
+            // 4. Claim missing Olm sessions
             const claimRequest = await this.cryptoManager.getMissingSessions(memberIds)
             if (claimRequest) {
+              log.debug('E2EE: claiming missing Olm sessions')
               const claimResponse = await this.httpAPI.sendOutgoingCryptoRequest(claimRequest)
               await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
             }
 
+            // 5. Share Megolm session key with all room members' devices
             const shareRequests = await this.cryptoManager.shareRoomKey(roomId, memberIds)
+            log.debug('E2EE: shareRoomKey returned', shareRequests.length, 'to_device requests')
             for (const req of shareRequests) {
               const resp = await this.httpAPI.sendOutgoingCryptoRequest(req)
               await this.cryptoManager.markRequestAsSent(req.id, req.type, resp)
             }
 
+            // 6. Process any remaining outgoing requests
+            await this.httpAPI.processOutgoingCryptoRequests(this.cryptoManager)
+
+            // 7. Encrypt the actual message
             const encrypted = await this.cryptoManager.encryptRoomEvent(roomId, eventType, content)
+            log.debug('E2EE: message encrypted for room', roomId)
             params = [roomId, 'm.room.encrypted', encrypted, ...rest]
           } catch (encryptError) {
-            getLogger().warn('Encryption failed, sending unencrypted:', encryptError.message)
+            log.warn('Encryption failed, sending unencrypted:', encryptError.message)
           }
         }
 
