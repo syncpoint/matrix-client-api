@@ -92,6 +92,19 @@ class CommandAPI {
             const shareRequests = await this.cryptoManager.shareRoomKey(roomId, memberIds)
             log.debug('E2EE: shareRoomKey returned', shareRequests.length, 'to_device requests')
             for (const req of shareRequests) {
+              // Log which devices receive keys vs withheld
+              try {
+                const body = JSON.parse(req.body)
+                const eventType = req.event_type || req.eventType || 'unknown'
+                log.debug(`E2EE: to_device type=${eventType}`)
+                if (body.messages) {
+                  for (const [userId, devices] of Object.entries(body.messages)) {
+                    for (const [deviceId, content] of Object.entries(devices)) {
+                      log.debug(`E2EE:   → ${userId} / ${deviceId}`)
+                    }
+                  }
+                }
+              } catch { /* ignore parse errors */ }
               const resp = await this.httpAPI.sendOutgoingCryptoRequest(req)
               await this.cryptoManager.markRequestAsSent(req.id, req.type, resp)
             }
