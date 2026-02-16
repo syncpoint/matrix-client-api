@@ -103,12 +103,12 @@ const MatrixClient = (loginData) => {
       const projectParams = {
         structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, crypto),
-        commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null)
+        commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null),
+        cryptoManager: crypto?.cryptoManager || null
       }
       const project = new Project(projectParams)
       project.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
       project.credentials = () => (httpAPI.credentials)
-      if (crypto) project.cryptoManager = crypto.cryptoManager
       return project
     }
   }

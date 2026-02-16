@@ -6,6 +6,8 @@ import {
   DeviceLists,
   RequestType,
   RoomId,
+  RoomSettings,
+  EncryptionAlgorithm,
   DecryptionSettings,
   TrustRequirement
 } from '@matrix-org/matrix-sdk-crypto-wasm'
@@ -152,6 +154,23 @@ class CryptoManager {
   async updateTrackedUsers (userIds) {
     if (!this.olmMachine) return
     await this.olmMachine.updateTrackedUsers(userIds.map(id => new UserId(id)))
+  }
+
+  /**
+   * Register a room as encrypted with the OlmMachine.
+   * Must be called when a room with m.room.encryption state is discovered.
+   * @param {string} roomId
+   * @param {Object} [encryptionContent] - Content of the m.room.encryption state event
+   */
+  async setRoomEncryption (roomId, encryptionContent = {}) {
+    if (!this.olmMachine) return
+    const log = getLogger()
+    const algorithm = encryptionContent.algorithm === 'm.megolm.v1.aes-sha2'
+      ? EncryptionAlgorithm.MegolmV1AesSha2
+      : EncryptionAlgorithm.MegolmV1AesSha2 // default to Megolm
+    const settings = new RoomSettings(algorithm, false, false)
+    await this.olmMachine.setRoomSettings(new RoomId(roomId), settings)
+    log.debug('Room encryption registered:', roomId)
   }
 
   get identityKeys () {

@@ -23,10 +23,11 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
+const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
+  this.cryptoManager = cryptoManager || null
 
   this.idMapping = new Map()
   this.idMapping.remember = function (upstream, downstream) {
@@ -72,6 +73,20 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   Object.values(hierarchy.wellknown).forEach(wellknownRoom => {
     this.idMapping.remember(wellknownRoom.room_id, wellknownRoom.id)
   })
+
+  // Register encrypted rooms with the CryptoManager
+  if (this.cryptoManager) {
+    const allRooms = { ...hierarchy.layers, ...hierarchy.wellknown }
+    for (const [roomId, room] of Object.entries(allRooms)) {
+      if (room.encryption) {
+        await this.cryptoManager.setRoomEncryption(roomId, room.encryption)
+      }
+    }
+    // Also check the space itself
+    if (hierarchy.encryption) {
+      await this.cryptoManager.setRoomEncryption(upstreamId, hierarchy.encryption)
+    }
+  }
 
   const projectStructure = {
     id,

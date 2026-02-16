@@ -209,6 +209,7 @@ class StructureAPI {
       powerlevel: space.powerlevel,
       room_id: space.room_id,
       topic: space.topic,
+      encryption: space.encryption || null,
       candidates, // invitations
       layers,
       wellknown
