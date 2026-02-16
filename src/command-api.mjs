@@ -2,8 +2,13 @@ import { FIFO } from './queue.mjs'
 import { getLogger } from './logger.mjs'
 
 class CommandAPI {
-  constructor (httpAPI) {
+  /**
+   * @param {import('./http-api.mjs').HttpAPI} httpAPI
+   * @param {import('./crypto.mjs').CryptoManager} [cryptoManager] - Optional CryptoManager for E2EE
+   */
+  constructor (httpAPI, cryptoManager) {
     this.httpAPI = httpAPI
+    this.cryptoManager = cryptoManager || null
     this.scheduledCalls = new FIFO()
   }
 
@@ -48,7 +53,39 @@ class CommandAPI {
         await chill(retryCounter)
 
         functionCall = await this.scheduledCalls.dequeue()
-        const [functionName, ...params] = functionCall        
+        let [functionName, ...params] = functionCall
+
+        // Encrypt outgoing message events if crypto is available
+        if (this.cryptoManager && functionName === 'sendMessageEvent') {
+          const [roomId, eventType, content, ...rest] = params
+          try {
+            // Ensure room keys are shared before encrypting
+            const members = await this.httpAPI.members(roomId)
+            const memberIds = (members.chunk || [])
+              .filter(e => e.membership === 'join')
+              .map(e => e.state_key || e.sender)
+            await this.cryptoManager.updateTrackedUsers(memberIds)
+            await this.httpAPI.processOutgoingCryptoRequests(this.cryptoManager)
+
+            const claimRequest = await this.cryptoManager.getMissingSessions(memberIds)
+            if (claimRequest) {
+              const claimResponse = await this.httpAPI.sendOutgoingCryptoRequest(claimRequest)
+              await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
+            }
+
+            const shareRequests = await this.cryptoManager.shareRoomKey(roomId, memberIds)
+            for (const req of shareRequests) {
+              const resp = await this.httpAPI.sendOutgoingCryptoRequest(req)
+              await this.cryptoManager.markRequestAsSent(req.id, req.type, resp)
+            }
+
+            const encrypted = await this.cryptoManager.encryptRoomEvent(roomId, eventType, content)
+            params = [roomId, 'm.room.encrypted', encrypted, ...rest]
+          } catch (encryptError) {
+            getLogger().warn('Encryption failed, sending unencrypted:', encryptError.message)
+          }
+        }
+
         await this.httpAPI[functionName].apply(this.httpAPI, params)
         const log = getLogger()
         log.debug('Command sent:', functionName)
