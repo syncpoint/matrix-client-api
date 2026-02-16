@@ -50,6 +50,7 @@ if (!HOME_SERVER || !USER_ID || !PASSWORD) {
 let credentials = null
 let projectList = null
 let project = null
+let client = null
 let streamController = null
 const STATE_FILE = new URL('.state.json', import.meta.url).pathname
 
@@ -147,7 +148,7 @@ const commands = {
       ...(ENCRYPTION ? { encryption: { enabled: true } } : {})
     }
 
-    const client = MatrixClient(loginData)
+    client = MatrixClient(loginData)
 
     print('🔌 Connecting to', HOME_SERVER, '...')
     await client.connect(new AbortController())
@@ -270,7 +271,7 @@ const commands = {
   },
 
   open: async (args) => {
-    if (!projectList) return print('❌ Not logged in')
+    if (!client || !projectList) return print('❌ Not logged in. Run: login')
     const [id] = args
     if (!id) return print('Usage: open <odin-id>')
 
@@ -282,13 +283,6 @@ const commands = {
 
     print(`📂 Opening project "${found.name}" ...`)
     
-    const loginData = {
-      home_server_url: HOME_SERVER,
-      user_id: USER_ID,
-      password: PASSWORD,
-      ...(ENCRYPTION ? { encryption: { enabled: true } } : {})
-    }
-    const client = MatrixClient(loginData)
     const proj = await client.project(credentials)
     const structure = await proj.hydrate({ id, upstreamId: found.upstreamId })
     project = proj

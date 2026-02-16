@@ -48,22 +48,34 @@ const MatrixClient = (loginData) => {
 
   const encryption = loginData.encryption || null
 
+  // Shared CryptoManager instance – initialized once, reused across projectList/project calls
+  let sharedCryptoManager = null
+  let cryptoInitialized = false
+
   /**
-   * Initialize the CryptoManager if encryption is enabled.
+   * Get or create the shared CryptoManager.
    * @param {HttpAPI} httpAPI
    * @returns {Promise<{cryptoManager: CryptoManager, httpAPI: HttpAPI} | null>}
    */
-  const initCrypto = async (httpAPI) => {
+  const getCrypto = async (httpAPI) => {
     if (!encryption?.enabled) return null
-    const cryptoManager = new CryptoManager()
+    if (sharedCryptoManager) {
+      // Reuse existing CryptoManager, just process any pending outgoing requests
+      if (!cryptoInitialized) {
+        await httpAPI.processOutgoingCryptoRequests(sharedCryptoManager)
+        cryptoInitialized = true
+      }
+      return { cryptoManager: sharedCryptoManager, httpAPI }
+    }
     const credentials = httpAPI.credentials
     if (!credentials.device_id) {
       throw new Error('E2EE requires a device_id in credentials. Ensure a fresh login (delete .state.json if reusing saved credentials).')
     }
-    await cryptoManager.initialize(credentials.user_id, credentials.device_id)
-    // Process initial key upload
-    await httpAPI.processOutgoingCryptoRequests(cryptoManager)
-    return { cryptoManager, httpAPI }
+    sharedCryptoManager = new CryptoManager()
+    await sharedCryptoManager.initialize(credentials.user_id, credentials.device_id)
+    await httpAPI.processOutgoingCryptoRequests(sharedCryptoManager)
+    cryptoInitialized = true
+    return { cryptoManager: sharedCryptoManager, httpAPI }
   }
 
   return {
@@ -72,7 +84,7 @@ const MatrixClient = (loginData) => {
     projectList: async mostRecentCredentials => {
       const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
       const httpAPI = new HttpAPI(credentials)
-      const crypto = await initCrypto(httpAPI)
+      const crypto = await getCrypto(httpAPI)
       const projectListParames = {
         structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, crypto)
@@ -87,7 +99,7 @@ const MatrixClient = (loginData) => {
     project: async mostRecentCredentials => {
       const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
       const httpAPI = new HttpAPI(credentials)
-      const crypto = await initCrypto(httpAPI)
+      const crypto = await getCrypto(httpAPI)
       const projectParams = {
         structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, crypto),
