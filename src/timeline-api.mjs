@@ -2,6 +2,51 @@ import { chill } from './convenience.mjs'
 import { getLogger } from './logger.mjs'
 
 const DEFAULT_POLL_TIMEOUT = 30000
+const M_ROOM_ENCRYPTED = 'm.room.encrypted'
+
+/**
+ * Inject 'm.room.encrypted' into a sync filter's types arrays when crypto is active.
+ * The server only sees the encrypted envelope type, not the original event type.
+ * Without this, all encrypted events would be silently dropped by the server-side filter.
+ *
+ * Returns a deep-cloned filter with 'm.room.encrypted' added to:
+ *   - filter.room.timeline.types (if present)
+ *
+ * The original types array is preserved as _originalTypes on the timeline object
+ * so that post-decryption client-side filtering can re-apply the original type constraint.
+ *
+ * @param {Object} filter - The sync filter object
+ * @returns {Object} The augmented filter (new object, original unchanged)
+ */
+function augmentFilterForCrypto (filter) {
+  if (!filter) return filter
+
+  const augmented = JSON.parse(JSON.stringify(filter))
+
+  const timeline = augmented.room?.timeline
+  if (timeline?.types && !timeline.types.includes(M_ROOM_ENCRYPTED)) {
+    // Preserve original types for post-decrypt filtering
+    timeline._originalTypes = [...timeline.types]
+    timeline.types.push(M_ROOM_ENCRYPTED)
+  }
+
+  return augmented
+}
+
+/**
+ * Apply post-decryption type filtering.
+ * After decryption, m.room.encrypted events have been replaced with their original type.
+ * We need to re-apply the original type constraint because m.room.encrypted is a catch-all —
+ * any event type could have been inside.
+ *
+ * @param {Object[]} roomEvents - Array of (possibly decrypted) events
+ * @param {string[]} originalTypes - The original types filter (before crypto augmentation)
+ * @returns {Object[]} Filtered events
+ */
+function applyPostDecryptTypeFilter (roomEvents, originalTypes) {
+  if (!originalTypes || originalTypes.length === 0) return roomEvents
+  return roomEvents.filter(event => originalTypes.includes(event.type))
+}
 
 /**
  * @param {import('./http-api.mjs').HttpAPI} httpApi
@@ -21,7 +66,42 @@ TimelineAPI.prototype.credentials = function () {
 TimelineAPI.prototype.content = async function (roomId, filter, from) {
   getLogger().debug('Timeline content filter:', JSON.stringify(filter))
 
-  return this.catchUp(roomId, null, null, 'f', filter)
+  // Augment the filter for crypto: add m.room.encrypted to types
+  let effectiveFilter = filter
+  let originalTypes = null
+  if (this.crypto && filter?.types && !filter.types.includes(M_ROOM_ENCRYPTED)) {
+    effectiveFilter = { ...filter, types: [...filter.types, M_ROOM_ENCRYPTED] }
+    originalTypes = filter.types
+  }
+
+  const result = await this.catchUp(roomId, null, null, 'f', effectiveFilter)
+
+  // Decrypt + post-filter
+  if (this.crypto && result.events) {
+    const { cryptoManager } = this.crypto
+    const log = getLogger()
+    for (let i = 0; i < result.events.length; i++) {
+      if (result.events[i].type === M_ROOM_ENCRYPTED) {
+        const decrypted = await cryptoManager.decryptRoomEvent(result.events[i], roomId)
+        if (decrypted) {
+          result.events[i] = {
+            ...result.events[i],
+            type: decrypted.event.type,
+            content: decrypted.event.content,
+            decrypted: true
+          }
+        } else {
+          log.warn('Could not decrypt event in room', roomId, result.events[i].event_id)
+        }
+      }
+    }
+
+    if (originalTypes) {
+      result.events = applyPostDecryptTypeFilter(result.events, originalTypes)
+    }
+  }
+
+  return result
 }
 
 
@@ -35,11 +115,17 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     and name changes only.
   */
 
+  // When crypto is active, inject 'm.room.encrypted' into the server-side filter
+  // so encrypted events are not silently dropped. The original types are preserved
+  // for post-decryption client-side filtering.
+  const effectiveFilter = this.crypto ? augmentFilterForCrypto(filter) : filter
+  const originalTypes = effectiveFilter?.room?.timeline?._originalTypes || null
+
   const events = {}
   // for catching up 
   const jobs = {}
 
-  const syncResult = await this.httpApi.sync(since, filter, timeout)
+  const syncResult = await this.httpApi.sync(since, effectiveFilter, timeout)
 
   // Feed crypto state from sync response
   if (this.crypto) {
@@ -63,8 +149,9 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   }
 
   // get the complete timeline for all rooms that we have already joined
+  // Use the effective (crypto-augmented) filter for catch-up too
   const catchUp = await Promise.all(
-    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', filter?.room?.timeline))
+    Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', effectiveFilter?.room?.timeline))
   )
   /* 
     Since we walk backwards ('b') in time we need to append the events at the head of the array
@@ -80,7 +167,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     const log = getLogger()
     for (const [roomId, roomEvents] of Object.entries(events)) {
       for (let i = 0; i < roomEvents.length; i++) {
-        if (roomEvents[i].type === 'm.room.encrypted') {
+        if (roomEvents[i].type === M_ROOM_ENCRYPTED) {
           const decrypted = await cryptoManager.decryptRoomEvent(roomEvents[i], roomId)
           if (decrypted) {
             roomEvents[i] = {
@@ -93,6 +180,13 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
             log.warn('Could not decrypt event in room', roomId, roomEvents[i].event_id)
           }
         }
+      }
+
+      // Post-decryption type filter: m.room.encrypted is a catch-all on the server side.
+      // After decryption, re-apply the original type constraint to ensure only expected
+      // event types are passed through (e.g. only io.syncpoint.odin.operation, not arbitrary types).
+      if (originalTypes) {
+        events[roomId] = applyPostDecryptTypeFilter(roomEvents, originalTypes)
       }
     }
   }
