@@ -1,0 +1,18 @@
+# Minimal Tuwunel config for E2E testing
+# No federation, no TLS, open registration
+
+[global]
+server_name = "test.localhost"
+database_path = "/var/lib/tuwunel"
+address = ["0.0.0.0"]
+port = 8008
+
+# Allow registration without token (test environment only!)
+allow_registration = true
+yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+
+# Disable federation (test-only server)
+allow_federation = false
+
+# No new user suffix
+new_user_displayname_suffix = ""
