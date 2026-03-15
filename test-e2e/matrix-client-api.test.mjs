@@ -1,8 +1,8 @@
 /**
  * Integration tests for matrix-client-api E2EE against a real Tuwunel homeserver.
  *
- * Tests the actual API components: HttpAPI, StructureAPI, CommandAPI, TimelineAPI
- * with CryptoManager wired in — not raw fetch calls.
+ * Tests the actual API layers as they are used in ODIN:
+ *   HttpAPI → CryptoManager → StructureAPI → CommandAPI → TimelineAPI
  *
  * Prerequisites:
  *   cd test-e2e && docker compose up -d
@@ -17,7 +17,7 @@ import { HttpAPI } from '../src/http-api.mjs'
 import { StructureAPI } from '../src/structure-api.mjs'
 import { CommandAPI } from '../src/command-api.mjs'
 import { TimelineAPI } from '../src/timeline-api.mjs'
-import { CryptoManager, RequestType } from '../src/crypto.mjs'
+import { CryptoManager } from '../src/crypto.mjs'
 import { setLogger } from '../src/logger.mjs'
 
 const HOMESERVER_URL = process.env.HOMESERVER_URL || 'http://localhost:8008'
@@ -33,8 +33,8 @@ if (!process.env.E2E_DEBUG) {
   })
 }
 
-/** Register a user via the registration API, return credentials. */
-async function registerAndLogin (username, deviceId) {
+/** Register a user and return credentials compatible with HttpAPI constructor. */
+async function registerUser (username, deviceId) {
   const res = await fetch(`${HOMESERVER_URL}/_matrix/client/v3/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -56,13 +56,13 @@ async function registerAndLogin (username, deviceId) {
   }
 }
 
-/** Create a fully wired API stack: HttpAPI + CryptoManager + StructureAPI + CommandAPI + TimelineAPI */
-async function createApiStack (credentials) {
+/** Build the full API stack as ODIN does it. */
+async function buildStack (credentials) {
   const httpAPI = new HttpAPI(credentials)
   const crypto = new CryptoManager()
   await crypto.initialize(credentials.user_id, credentials.device_id)
 
-  // Upload device keys
+  // Upload device keys (same as ODIN does on project open)
   await httpAPI.processOutgoingCryptoRequests(crypto)
 
   const structureAPI = new StructureAPI(httpAPI)
@@ -72,35 +72,36 @@ async function createApiStack (credentials) {
   return { httpAPI, crypto, structureAPI, commandAPI, timelineAPI }
 }
 
-/** Run a single /sync cycle and process crypto */
-async function doSync (timelineAPI, since, filter) {
-  // TimelineAPI.content() does sync + crypto processing internally,
-  // but we need lower-level access. Use httpAPI directly.
-  const httpAPI = timelineAPI.httpAPI
-  const crypto = timelineAPI.crypto
-
-  const syncResult = await httpAPI.sync(since, filter, 0)
-
-  // Process crypto from sync
-  if (crypto) {
-    const { cryptoManager, httpAPI: cryptoHttpAPI } = crypto
-    const toDevice = syncResult.to_device?.events || []
-    const deviceLists = syncResult.device_lists || {}
-    const otkeyCounts = syncResult.device_one_time_keys_count || {}
-    const fallbackKeys = syncResult.device_unused_fallback_key_types || []
-
-    await cryptoManager.receiveSyncChanges(toDevice, deviceLists, otkeyCounts, fallbackKeys)
-    await cryptoHttpAPI.processOutgoingCryptoRequests(cryptoManager)
-  }
-
-  return syncResult
+/**
+ * Wait for CommandAPI to process scheduled items.
+ * The FIFO queue blocks on dequeue() when empty, so we can't check length.
+ * Instead, we wait until the queue is blocked (waiting for new items),
+ * which means all scheduled items have been processed.
+ */
+function waitForCommandQueue (commandAPI, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs
+    const check = () => {
+      if (commandAPI.scheduledCalls.isBlocked()) {
+        // Queue is waiting for new items = all scheduled items processed
+        // Small grace period for the HTTP response to complete
+        setTimeout(resolve, 500)
+      } else if (Date.now() > deadline) {
+        reject(new Error('CommandAPI queue did not drain in time'))
+      } else {
+        setTimeout(check, 100)
+      }
+    }
+    // Start checking after a brief delay to let run() pick up items
+    setTimeout(check, 100)
+  })
 }
 
 describe('matrix-client-api E2EE Integration', function () {
   this.timeout(30000)
 
   let aliceCreds, bobCreds
-  let alice, bob // { httpAPI, crypto, structureAPI, commandAPI, timelineAPI }
+  let alice, bob
 
   before(async function () {
     // Check homeserver availability
@@ -112,259 +113,244 @@ describe('matrix-client-api E2EE Integration', function () {
       this.skip()
     }
 
-    aliceCreds = await registerAndLogin(`alice_api_${suffix}`, `ALICE_${suffix}`)
-    bobCreds = await registerAndLogin(`bob_api_${suffix}`, `BOB_${suffix}`)
+    aliceCreds = await registerUser(`alice_${suffix}`, `ALICE_${suffix}`)
+    bobCreds = await registerUser(`bob_${suffix}`, `BOB_${suffix}`)
 
-    alice = await createApiStack(aliceCreds)
-    bob = await createApiStack(bobCreds)
+    alice = await buildStack(aliceCreds)
+    bob = await buildStack(bobCreds)
   })
 
   after(async function () {
+    if (alice?.commandAPI) await alice.commandAPI.stop()
+    if (bob?.commandAPI) await bob.commandAPI.stop()
     if (alice?.crypto) await alice.crypto.close()
     if (bob?.crypto) await bob.crypto.close()
   })
 
-  describe('HttpAPI + CryptoManager', function () {
+  // ─── Layer 1: HttpAPI + CryptoManager ───────────────────────────────
 
-    it('should upload device keys via processOutgoingCryptoRequests()', async () => {
-      // Keys were uploaded in createApiStack. Verify by querying.
+  describe('Layer 1: HttpAPI + CryptoManager', function () {
+
+    it('device keys should be on the server after processOutgoingCryptoRequests()', async () => {
+      // Bob queries Alice's keys — verifies that HttpAPI.processOutgoingCryptoRequests() worked
       const result = await bob.httpAPI.client.post('v3/keys/query', {
         json: { device_keys: { [aliceCreds.user_id]: [] } }
       }).json()
 
-      assert.ok(result.device_keys[aliceCreds.user_id], 'Alice\'s device keys should be on the server')
       const device = result.device_keys[aliceCreds.user_id][aliceCreds.device_id]
-      assert.ok(device, 'Alice\'s specific device should exist')
-      assert.ok(device.keys[`ed25519:${aliceCreds.device_id}`], 'ed25519 key present')
-      assert.ok(device.keys[`curve25519:${aliceCreds.device_id}`], 'curve25519 key present')
+      assert.ok(device, 'Alice\'s device should exist on the server')
+      assert.ok(device.keys[`curve25519:${aliceCreds.device_id}`])
+      assert.ok(device.keys[`ed25519:${aliceCreds.device_id}`])
     })
 
-    it('should process keys/query via sendOutgoingCryptoRequest()', async () => {
-      // Alice queries Bob's keys through the crypto pipeline
+    it('sendOutgoingCryptoRequest() should handle KeysQuery', async () => {
       await alice.crypto.updateTrackedUsers([bobCreds.user_id])
       const queryReq = await alice.crypto.queryKeysForUsers([bobCreds.user_id])
-      assert.ok(queryReq, 'should produce a keys/query request')
+      assert.ok(queryReq, 'should produce a KeysQuery request')
 
       const response = await alice.httpAPI.sendOutgoingCryptoRequest(queryReq)
       await alice.crypto.markRequestAsSent(queryReq.id, queryReq.type, response)
-      // No error = success
+      // Success = no error
     })
   })
 
-  describe('StructureAPI — Encrypted Room Creation', function () {
+  // ─── Layer 2: StructureAPI ──────────────────────────────────────────
 
-    it('should create a room with m.room.encryption state', async () => {
-      const room = await alice.httpAPI.createRoom({
-        name: 'E2EE Structure Test',
-        initial_state: [{
-          type: 'm.room.encryption',
-          content: { algorithm: 'm.megolm.v1.aes-sha2' },
-          state_key: ''
-        }]
-      })
+  describe('Layer 2: StructureAPI', function () {
 
-      assert.ok(room.room_id, 'room should be created')
+    it('createProject({ encrypted: true }) should set m.room.encryption state', async () => {
+      const project = await alice.structureAPI.createProject(
+        'e2ee-test-project', 'E2EE Test Project', 'Testing encryption',
+        undefined, { encrypted: true }
+      )
+      assert.ok(project.globalId, 'project should be created')
 
-      // Verify encryption state
-      const state = await alice.httpAPI.getState(room.room_id)
-      const encryptionEvent = state.find(e => e.type === 'm.room.encryption')
-      assert.ok(encryptionEvent, 'room should have encryption state')
-      assert.strictEqual(encryptionEvent.content.algorithm, 'm.megolm.v1.aes-sha2')
+      // Verify encryption state on the room
+      const state = await alice.httpAPI.getState(project.globalId)
+      const encEvent = state.find(e => e.type === 'm.room.encryption')
+      assert.ok(encEvent, 'project room should have m.room.encryption state')
+      assert.strictEqual(encEvent.content.algorithm, 'm.megolm.v1.aes-sha2')
+    })
+
+    it('createLayer({ encrypted: true }) should set m.room.encryption state', async () => {
+      const layer = await alice.structureAPI.createLayer(
+        'e2ee-test-layer', 'E2EE Test Layer', 'Testing encryption',
+        undefined, { encrypted: true }
+      )
+      assert.ok(layer.globalId, 'layer should be created')
+
+      const state = await alice.httpAPI.getState(layer.globalId)
+      const encEvent = state.find(e => e.type === 'm.room.encryption')
+      assert.ok(encEvent, 'layer room should have m.room.encryption state')
+      assert.strictEqual(encEvent.content.algorithm, 'm.megolm.v1.aes-sha2')
+    })
+
+    it('createProject() without encrypted option should NOT set encryption', async () => {
+      const project = await alice.structureAPI.createProject(
+        'plain-project', 'Plain Project', 'No encryption'
+      )
+      const state = await alice.httpAPI.getState(project.globalId)
+      const encEvent = state.find(e => e.type === 'm.room.encryption')
+      assert.strictEqual(encEvent, undefined, 'should not have encryption state')
     })
   })
 
-  describe('CommandAPI — Encrypted Send', function () {
-    let encryptedRoomId
+  // ─── Layer 3: CommandAPI (encrypted send) ───────────────────────────
 
-    before(async function () {
-      // Create encrypted room, invite Bob, Bob joins
-      const room = await alice.httpAPI.createRoom({
-        name: 'E2EE Command Test',
-        invite: [bobCreds.user_id],
-        initial_state: [{
-          type: 'm.room.encryption',
-          content: { algorithm: 'm.megolm.v1.aes-sha2' },
-          state_key: ''
-        }]
-      })
-      encryptedRoomId = room.room_id
-      await bob.httpAPI.join(encryptedRoomId)
-
-      // Register encryption with both crypto managers
-      await alice.crypto.setRoomEncryption(encryptedRoomId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(encryptedRoomId, { algorithm: 'm.megolm.v1.aes-sha2' })
-
-      // Sync both to pick up device lists
-      await alice.httpAPI.sync(undefined, undefined, 0)
-      await bob.httpAPI.sync(undefined, undefined, 0)
-    })
-
-    it('should encrypt and send a message via CommandAPI', async () => {
-      // CommandAPI.execute() encrypts automatically when cryptoManager is set
-      // We test the lower-level flow here since execute() has ODIN-specific routing
-
-      // Alice: track Bob, query keys, claim OTKs, share room key, encrypt, send
-      await alice.crypto.updateTrackedUsers([bobCreds.user_id, aliceCreds.user_id])
-
-      const keysQuery = await alice.crypto.queryKeysForUsers([bobCreds.user_id])
-      if (keysQuery) {
-        const resp = await alice.httpAPI.sendOutgoingCryptoRequest(keysQuery)
-        await alice.crypto.markRequestAsSent(keysQuery.id, keysQuery.type, resp)
-      }
-
-      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
-
-      const claimReq = await alice.crypto.getMissingSessions([bobCreds.user_id])
-      if (claimReq) {
-        const resp = await alice.httpAPI.sendOutgoingCryptoRequest(claimReq)
-        await alice.crypto.markRequestAsSent(claimReq.id, claimReq.type, resp)
-      }
-
-      // Share room key
-      const shareRequests = await alice.crypto.shareRoomKey(
-        encryptedRoomId, [aliceCreds.user_id, bobCreds.user_id]
-      )
-      for (const req of shareRequests) {
-        const resp = await alice.httpAPI.sendOutgoingCryptoRequest(req)
-        if (req.id && req.type !== undefined) {
-          await alice.crypto.markRequestAsSent(req.id, req.type, resp)
-        }
-      }
-
-      // Encrypt
-      const plaintext = { msgtype: 'm.text', body: 'CommandAPI encrypted message' }
-      const encrypted = await alice.crypto.encryptRoomEvent(
-        encryptedRoomId, 'm.room.message', plaintext
-      )
-      assert.strictEqual(encrypted.algorithm, 'm.megolm.v1.aes-sha2')
-      assert.ok(encrypted.ciphertext)
-
-      // Send via HttpAPI (as CommandAPI would)
-      const result = await alice.httpAPI.sendMessageEvent(
-        encryptedRoomId, 'm.room.encrypted', encrypted
-      )
-      assert.ok(result.event_id, 'encrypted event should be sent')
-    })
-  })
-
-  describe('TimelineAPI — Decrypt on Receive', function () {
+  describe('Layer 3: CommandAPI', function () {
     let roomId
 
     before(async function () {
-      // Create encrypted room
-      const room = await alice.httpAPI.createRoom({
-        name: 'E2EE Timeline Test',
-        invite: [bobCreds.user_id],
-        initial_state: [{
-          type: 'm.room.encryption',
-          content: { algorithm: 'm.megolm.v1.aes-sha2' },
-          state_key: ''
-        }]
-      })
-      roomId = room.room_id
+      // Create encrypted room via StructureAPI, invite Bob
+      const layer = await alice.structureAPI.createLayer(
+        'cmd-test-layer', 'CommandAPI Test', '',
+        undefined, { encrypted: true }
+      )
+      roomId = layer.globalId
+
+      // Invite and join Bob
+      await alice.httpAPI.invite(roomId, bobCreds.user_id)
       await bob.httpAPI.join(roomId)
 
-      // Register encryption
+      // Register encryption with both CryptoManagers
       await alice.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
       await bob.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
 
-      // Sync both
-      const aliceSync = await alice.httpAPI.sync(undefined, undefined, 0)
-      const bobSync = await bob.httpAPI.sync(undefined, undefined, 0)
-
-      // Process crypto for both
+      // Initial sync for both to discover device lists
+      const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
       await alice.crypto.receiveSyncChanges(
-        aliceSync.to_device?.events || [], aliceSync.device_lists || {},
-        aliceSync.device_one_time_keys_count || {}, aliceSync.device_unused_fallback_key_types || []
+        aSync.to_device?.events || [], aSync.device_lists || {},
+        aSync.device_one_time_keys_count || {}, []
       )
       await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
 
+      const bSync = await bob.httpAPI.sync(undefined, undefined, 0)
       await bob.crypto.receiveSyncChanges(
-        bobSync.to_device?.events || [], bobSync.device_lists || {},
-        bobSync.device_one_time_keys_count || {}, bobSync.device_unused_fallback_key_types || []
+        bSync.to_device?.events || [], bSync.device_lists || {},
+        bSync.device_one_time_keys_count || {}, []
       )
       await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
-
-      // Alice: full key exchange + send encrypted message
-      await alice.crypto.updateTrackedUsers([bobCreds.user_id, aliceCreds.user_id])
-      const kq = await alice.crypto.queryKeysForUsers([bobCreds.user_id])
-      if (kq) {
-        const r = await alice.httpAPI.sendOutgoingCryptoRequest(kq)
-        await alice.crypto.markRequestAsSent(kq.id, kq.type, r)
-      }
-      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
-
-      const claim = await alice.crypto.getMissingSessions([bobCreds.user_id])
-      if (claim) {
-        const r = await alice.httpAPI.sendOutgoingCryptoRequest(claim)
-        await alice.crypto.markRequestAsSent(claim.id, claim.type, r)
-      }
-
-      const shares = await alice.crypto.shareRoomKey(roomId, [aliceCreds.user_id, bobCreds.user_id])
-      for (const req of shares) {
-        const r = await alice.httpAPI.sendOutgoingCryptoRequest(req)
-        if (req.id && req.type !== undefined) await alice.crypto.markRequestAsSent(req.id, req.type, r)
-      }
-
-      const encrypted = await alice.crypto.encryptRoomEvent(
-        roomId, 'm.room.message', { msgtype: 'm.text', body: 'Timeline decrypt test' }
-      )
-      await alice.httpAPI.sendMessageEvent(roomId, 'm.room.encrypted', encrypted)
     })
 
-    it('should decrypt received messages via CryptoManager', async () => {
-      // Bob syncs — picks up to-device keys + encrypted room message
-      const bobSync = await bob.httpAPI.sync(undefined, undefined, 0)
+    it('should encrypt and send via schedule() + run()', async () => {
+      // Schedule a message through CommandAPI (as ODIN does)
+      alice.commandAPI.schedule([
+        'sendMessageEvent', roomId, 'io.syncpoint.odin.operation',
+        { content: 'dGVzdCBvcGVyYXRpb24=' } // base64 "test operation"
+      ])
 
-      // Process to-device events (room key delivery)
-      await bob.crypto.receiveSyncChanges(
-        bobSync.to_device?.events || [], bobSync.device_lists || {},
-        bobSync.device_one_time_keys_count || {}, bobSync.device_unused_fallback_key_types || []
-      )
-      await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+      // Start the command runner
+      alice.commandAPI.run()
 
-      // Find encrypted events in the room
-      const roomData = bobSync.rooms?.join?.[roomId]
-      assert.ok(roomData, 'Bob should have joined room data in sync')
+      // Wait for the queue to drain
+      await waitForCommandQueue(alice.commandAPI)
 
-      const timeline = roomData.timeline?.events || []
-      const encryptedEvents = timeline.filter(e => e.type === 'm.room.encrypted')
+      // Verify: the event on the server should be m.room.encrypted (not plaintext)
+      const sync = await bob.httpAPI.sync(undefined, undefined, 0)
+      const roomEvents = sync.rooms?.join?.[roomId]?.timeline?.events || []
 
-      // Decrypt each encrypted event
-      let decryptedMessage = null
-      for (const event of encryptedEvents) {
-        const result = await bob.crypto.decryptRoomEvent(event, roomId)
-        if (result && result.event.content?.body === 'Timeline decrypt test') {
-          decryptedMessage = result
-        }
-      }
+      // There should be at least one m.room.encrypted event
+      const encrypted = roomEvents.filter(e => e.type === 'm.room.encrypted')
+      assert.ok(encrypted.length > 0, 'CommandAPI should have sent an encrypted event')
+      assert.strictEqual(encrypted[0].content.algorithm, 'm.megolm.v1.aes-sha2')
 
-      assert.ok(decryptedMessage, 'Bob should decrypt Alice\'s message')
-      assert.strictEqual(decryptedMessage.event.content.body, 'Timeline decrypt test')
-      assert.strictEqual(decryptedMessage.event.type, 'm.room.message')
-      assert.strictEqual(decryptedMessage.event.content.msgtype, 'm.text')
+      // The original ODIN event type should NOT appear in plaintext
+      const plaintext = roomEvents.filter(e => e.type === 'io.syncpoint.odin.operation')
+      assert.strictEqual(plaintext.length, 0, 'original event type should not be visible')
+
+      await alice.commandAPI.stop()
     })
   })
 
-  describe('Full Round-Trip: Alice sends, Bob receives', function () {
-    it('should complete a full E2EE cycle through the API stack', async () => {
-      // 1. Create encrypted room
-      const room = await alice.httpAPI.createRoom({
-        name: 'Full Round-Trip',
-        invite: [bobCreds.user_id],
-        initial_state: [{
-          type: 'm.room.encryption',
-          content: { algorithm: 'm.megolm.v1.aes-sha2' },
-          state_key: ''
-        }]
-      })
-      await bob.httpAPI.join(room.room_id)
+  // ─── Layer 4: TimelineAPI (transparent decrypt) ─────────────────────
 
-      // 2. Register encryption
-      await alice.crypto.setRoomEncryption(room.room_id, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(room.room_id, { algorithm: 'm.megolm.v1.aes-sha2' })
+  describe('Layer 4: TimelineAPI', function () {
+    let roomId
+    let aliceSyncToken
 
-      // 3. Initial sync for both
+    before(async function () {
+      // Create encrypted room, invite Bob, join
+      const layer = await alice.structureAPI.createLayer(
+        'timeline-test-layer', 'TimelineAPI Test', '',
+        undefined, { encrypted: true }
+      )
+      roomId = layer.globalId
+
+      await alice.httpAPI.invite(roomId, bobCreds.user_id)
+      await bob.httpAPI.join(roomId)
+
+      await alice.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await bob.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+
+      // Initial sync for both
+      const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
+      await alice.crypto.receiveSyncChanges(
+        aSync.to_device?.events || [], aSync.device_lists || {},
+        aSync.device_one_time_keys_count || {}, []
+      )
+      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
+      aliceSyncToken = aSync.next_batch
+
+      const bSync = await bob.httpAPI.sync(undefined, undefined, 0)
+      await bob.crypto.receiveSyncChanges(
+        bSync.to_device?.events || [], bSync.device_lists || {},
+        bSync.device_one_time_keys_count || {}, []
+      )
+      await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+
+      // Alice sends an encrypted message via CommandAPI
+      alice.commandAPI.schedule([
+        'sendMessageEvent', roomId, 'io.syncpoint.odin.operation',
+        { content: 'dGltZWxpbmUgdGVzdA==' } // base64 "timeline test"
+      ])
+      alice.commandAPI.run()
+      await waitForCommandQueue(alice.commandAPI)
+      await alice.commandAPI.stop()
+    })
+
+    it('syncTimeline() should transparently decrypt m.room.encrypted events', async () => {
+      // Bob uses TimelineAPI.syncTimeline() — the way ODIN consumes events
+      const result = await bob.timelineAPI.syncTimeline(null, undefined, 0)
+
+      assert.ok(result.next_batch, 'should return a sync token')
+      assert.ok(result.events, 'should return events')
+
+      // Find events for our room
+      const roomEvents = result.events[roomId] || []
+
+      // Look for decrypted ODIN operation events
+      const odinEvents = roomEvents.filter(e => e.type === 'io.syncpoint.odin.operation')
+
+      assert.ok(odinEvents.length > 0,
+        'TimelineAPI should have transparently decrypted the event back to io.syncpoint.odin.operation')
+
+      // Verify the decrypted flag is set
+      const decryptedEvent = odinEvents.find(e => e.decrypted === true)
+      assert.ok(decryptedEvent, 'decrypted events should have decrypted=true flag')
+      assert.deepStrictEqual(decryptedEvent.content, { content: 'dGltZWxpbmUgdGVzdA==' })
+    })
+  })
+
+  // ─── Full Stack: StructureAPI → CommandAPI → TimelineAPI ────────────
+
+  describe('Full Stack Round-Trip', function () {
+
+    it('Alice creates encrypted layer via StructureAPI, sends via CommandAPI, Bob receives via TimelineAPI', async () => {
+      // 1. StructureAPI: Create encrypted layer
+      const layer = await alice.structureAPI.createLayer(
+        `roundtrip-${suffix}`, 'Full Stack Test', 'E2EE round-trip',
+        undefined, { encrypted: true }
+      )
+
+      // 2. Invite + Join
+      await alice.httpAPI.invite(layer.globalId, bobCreds.user_id)
+      await bob.httpAPI.join(layer.globalId)
+
+      // 3. Register encryption
+      await alice.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await bob.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
+
+      // 4. Initial sync both
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
       await alice.crypto.receiveSyncChanges(
         aSync.to_device?.events || [], aSync.device_lists || {},
@@ -379,59 +365,27 @@ describe('matrix-client-api E2EE Integration', function () {
       )
       await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
 
-      // 4. Key exchange
-      await alice.crypto.updateTrackedUsers([aliceCreds.user_id, bobCreds.user_id])
-      const kq = await alice.crypto.queryKeysForUsers([bobCreds.user_id])
-      if (kq) {
-        const r = await alice.httpAPI.sendOutgoingCryptoRequest(kq)
-        await alice.crypto.markRequestAsSent(kq.id, kq.type, r)
-      }
-      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
+      // 5. CommandAPI: Alice sends 2 ODIN operations
+      alice.commandAPI.schedule([
+        'sendMessageEvent', layer.globalId, 'io.syncpoint.odin.operation',
+        { content: 'b3BlcmF0aW9uIDE=' } // "operation 1"
+      ])
+      alice.commandAPI.schedule([
+        'sendMessageEvent', layer.globalId, 'io.syncpoint.odin.operation',
+        { content: 'b3BlcmF0aW9uIDI=' } // "operation 2"
+      ])
+      alice.commandAPI.run()
+      await waitForCommandQueue(alice.commandAPI)
+      await alice.commandAPI.stop()
 
-      const claim = await alice.crypto.getMissingSessions([bobCreds.user_id])
-      if (claim) {
-        const r = await alice.httpAPI.sendOutgoingCryptoRequest(claim)
-        await alice.crypto.markRequestAsSent(claim.id, claim.type, r)
-      }
+      // 6. TimelineAPI: Bob receives and decrypts
+      const result = await bob.timelineAPI.syncTimeline(null, undefined, 0)
+      const roomEvents = result.events[layer.globalId] || []
+      const odinOps = roomEvents.filter(e => e.type === 'io.syncpoint.odin.operation' && e.decrypted)
 
-      const shares = await alice.crypto.shareRoomKey(room.room_id, [aliceCreds.user_id, bobCreds.user_id])
-      for (const req of shares) {
-        const r = await alice.httpAPI.sendOutgoingCryptoRequest(req)
-        if (req.id && req.type !== undefined) await alice.crypto.markRequestAsSent(req.id, req.type, r)
-      }
-
-      // 5. Alice sends 3 encrypted messages
-      const messages = ['First secret', 'Second secret', 'Third secret']
-      for (const msg of messages) {
-        const encrypted = await alice.crypto.encryptRoomEvent(
-          room.room_id, 'm.room.message', { msgtype: 'm.text', body: msg }
-        )
-        await alice.httpAPI.sendMessageEvent(room.room_id, 'm.room.encrypted', encrypted)
-      }
-
-      // 6. Bob syncs and decrypts
-      const bobSync2 = await bob.httpAPI.sync(undefined, undefined, 0)
-      await bob.crypto.receiveSyncChanges(
-        bobSync2.to_device?.events || [], bobSync2.device_lists || {},
-        bobSync2.device_one_time_keys_count || {}, []
-      )
-      await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
-
-      const timeline = bobSync2.rooms?.join?.[room.room_id]?.timeline?.events || []
-      const encryptedEvents = timeline.filter(e => e.type === 'm.room.encrypted')
-
-      const decryptedBodies = []
-      for (const event of encryptedEvents) {
-        const result = await bob.crypto.decryptRoomEvent(event, room.room_id)
-        if (result?.event?.content?.body) {
-          decryptedBodies.push(result.event.content.body)
-        }
-      }
-
-      // Verify all 3 messages were decrypted
-      assert.ok(decryptedBodies.includes('First secret'), 'should decrypt first message')
-      assert.ok(decryptedBodies.includes('Second secret'), 'should decrypt second message')
-      assert.ok(decryptedBodies.includes('Third secret'), 'should decrypt third message')
+      assert.strictEqual(odinOps.length, 2, 'Bob should receive 2 decrypted ODIN operations')
+      assert.deepStrictEqual(odinOps[0].content, { content: 'b3BlcmF0aW9uIDE=' })
+      assert.deepStrictEqual(odinOps[1].content, { content: 'b3BlcmF0aW9uIDI=' })
     })
   })
 })
