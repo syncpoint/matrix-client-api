@@ -74,6 +74,49 @@ describe('CryptoManager Lifecycle', function () {
   })
 })
 
+describe('CryptoManager Persistent Store', function () {
+  this.timeout(10000)
+
+  it('should have initializeWithStore() method', () => {
+    const crypto = new CryptoManager()
+    assert.strictEqual(typeof crypto.initializeWithStore, 'function')
+  })
+
+  it('should report isPersistent=false for in-memory init', async () => {
+    const crypto = new CryptoManager()
+    await crypto.initialize('@alice:test', 'DEVICE_A')
+    assert.strictEqual(crypto.isPersistent, false)
+  })
+
+  it('should fail initializeWithStore() in Node.js (no IndexedDB)', async () => {
+    const crypto = new CryptoManager()
+    await assert.rejects(
+      () => crypto.initializeWithStore('@alice:test', 'DEVICE_A', 'crypto-test', 'passphrase'),
+      /indexedDB/i,
+      'should fail because IndexedDB is not available in Node.js'
+    )
+  })
+
+  it('should have close() method that cleans up', async () => {
+    const crypto = new CryptoManager()
+    await crypto.initialize('@alice:test', 'DEVICE_A')
+    assert.ok(crypto.olmMachine)
+    await crypto.close()
+    assert.strictEqual(crypto.olmMachine, null)
+    assert.strictEqual(crypto.storeHandle, null)
+  })
+
+  it('should throw on operations after close()', async () => {
+    const crypto = new CryptoManager()
+    await crypto.initialize('@alice:test', 'DEVICE_A')
+    await crypto.close()
+    await assert.rejects(
+      () => crypto.encryptRoomEvent('!room:test', 'm.room.message', { body: 'test' }),
+      { message: 'CryptoManager not initialized' }
+    )
+  })
+})
+
 describe('Room Encryption Registration', function () {
   this.timeout(10000)
 

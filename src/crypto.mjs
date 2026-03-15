@@ -1,6 +1,7 @@
 import {
   initAsync,
   OlmMachine,
+  StoreHandle,
   UserId,
   DeviceId,
   DeviceLists,
@@ -16,8 +17,15 @@ import { getLogger } from './logger.mjs'
 class CryptoManager {
   constructor () {
     this.olmMachine = null
+    this.storeHandle = null
   }
 
+  /**
+   * Initialize with an in-memory store (no persistence).
+   * Use initializeWithStore() for persistent crypto state.
+   * @param {string} userId
+   * @param {string} deviceId
+   */
   async initialize (userId, deviceId) {
     const log = getLogger()
     await initAsync()
@@ -25,7 +33,33 @@ class CryptoManager {
       new UserId(userId),
       new DeviceId(deviceId)
     )
-    log.info('OlmMachine initialized for', userId, deviceId)
+    log.info('OlmMachine initialized (in-memory) for', userId, deviceId)
+  }
+
+  /**
+   * Initialize with a persistent IndexedDB-backed store.
+   * Crypto state (Olm/Megolm sessions, device keys) survives restarts.
+   * @param {string} userId
+   * @param {string} deviceId
+   * @param {string} storeName - IndexedDB database name (e.g. 'crypto-<projectUUID>')
+   * @param {string} [passphrase] - Optional passphrase to encrypt the store
+   */
+  async initializeWithStore (userId, deviceId, storeName, passphrase) {
+    const log = getLogger()
+    await initAsync()
+
+    if (passphrase) {
+      this.storeHandle = await StoreHandle.open(storeName, passphrase)
+    } else {
+      this.storeHandle = await StoreHandle.open(storeName)
+    }
+
+    this.olmMachine = await OlmMachine.initFromStore(
+      new UserId(userId),
+      new DeviceId(deviceId),
+      this.storeHandle
+    )
+    log.info('OlmMachine initialized (persistent) for', userId, deviceId, 'store:', storeName)
   }
 
   /**
@@ -182,6 +216,27 @@ class CryptoManager {
     const settings = new RoomSettings(algorithm, false, false)
     await this.olmMachine.setRoomSettings(new RoomId(roomId), settings)
     log.debug('Room encryption registered:', roomId)
+  }
+
+  /**
+   * Close the crypto store and release resources.
+   * After closing, the CryptoManager must be re-initialized before use.
+   */
+  async close () {
+    const log = getLogger()
+    if (this.storeHandle) {
+      this.storeHandle.free()
+      this.storeHandle = null
+      log.debug('Crypto store handle released')
+    }
+    this.olmMachine = null
+  }
+
+  /**
+   * Whether this CryptoManager uses a persistent store.
+   */
+  get isPersistent () {
+    return this.storeHandle !== null
   }
 
   get identityKeys () {
