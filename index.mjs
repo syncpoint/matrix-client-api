@@ -40,6 +40,8 @@ const connect = (home_server_url) => async (controller) => {
  * @property {String} home_server_url
  * @property {Object} [encryption] - Optional encryption configuration
  * @property {boolean} [encryption.enabled=false] - Enable E2EE
+ * @property {string} [encryption.storeName] - IndexedDB store name for persistent crypto state (e.g. 'crypto-<projectUUID>')
+ * @property {string} [encryption.passphrase] - Passphrase to encrypt the IndexedDB store
  * 
  * @param {LoginData} loginData 
  * @returns {Object} matrixClient
@@ -54,6 +56,8 @@ const MatrixClient = (loginData) => {
 
   /**
    * Get or create the shared CryptoManager.
+   * If encryption.storeName is provided, uses IndexedDB-backed persistent store.
+   * Otherwise, uses in-memory store (keys lost on restart).
    * @param {HttpAPI} httpAPI
    * @returns {Promise<{cryptoManager: CryptoManager, httpAPI: HttpAPI} | null>}
    */
@@ -72,7 +76,20 @@ const MatrixClient = (loginData) => {
       throw new Error('E2EE requires a device_id in credentials. Ensure a fresh login (delete .state.json if reusing saved credentials).')
     }
     sharedCryptoManager = new CryptoManager()
-    await sharedCryptoManager.initialize(credentials.user_id, credentials.device_id)
+
+    if (encryption.storeName) {
+      // Persistent store: crypto state survives restarts (requires IndexedDB, i.e. Electron/browser)
+      await sharedCryptoManager.initializeWithStore(
+        credentials.user_id,
+        credentials.device_id,
+        encryption.storeName,
+        encryption.passphrase
+      )
+    } else {
+      // In-memory: keys are lost on restart (for testing or non-browser environments)
+      await sharedCryptoManager.initialize(credentials.user_id, credentials.device_id)
+    }
+
     await httpAPI.processOutgoingCryptoRequests(sharedCryptoManager)
     cryptoInitialized = true
     return { cryptoManager: sharedCryptoManager, httpAPI }
