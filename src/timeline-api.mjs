@@ -140,7 +140,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   }
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
-    if (content.timeline.events?.length === 0) continue
+    if (!content.timeline?.events?.length) continue
 
     events[roomId] = content.timeline.events
     if (content.timeline.limited) {
