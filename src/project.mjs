@@ -131,6 +131,13 @@ Project.prototype.shareLayer = async function (layerId, name, description, optio
   await this.structureAPI.addLayerToProject(this.idMapping.get(this.projectId), layer.globalId)
   this.idMapping.remember(layerId, layer.globalId)
 
+  // Share historical Megolm keys with all project members at share time.
+  // This ensures that members who join later (even when we're offline) can
+  // decrypt the layer content, because to_device messages are queued server-side.
+  if (this.cryptoManager && options.encrypted) {
+    await this._shareHistoricalKeysWithProjectMembers(layer.globalId)
+  }
+
   return {
     id: layerId,
     upstreamId: layer.globalId,
@@ -155,6 +162,63 @@ Project.prototype.joinLayer = async function (layerId) {
   }
   delete layer.powerlevel
   return layer
+}
+
+/**
+ * Share all historical Megolm session keys for a room with all project members.
+ * Used at share time (when creating/sharing a layer) and when new members join.
+ * to_device messages are queued server-side, so offline recipients get them on next sync.
+ * @private
+ */
+Project.prototype._shareHistoricalKeysWithProjectMembers = async function (roomId, targetUserIds) {
+  const log = getLogger()
+  const myUserId = this.timelineAPI.credentials().user_id
+
+  try {
+    // If no specific targets, get all project members
+    let userIds = targetUserIds
+    if (!userIds) {
+      const projectRoomId = this.idMapping.get(this.projectId)
+      const members = await this.commandAPI.httpAPI.members(projectRoomId)
+      userIds = (members.chunk || [])
+        .filter(e => e.content?.membership === 'join')
+        .map(e => e.state_key)
+        .filter(id => id !== myUserId)
+    }
+
+    if (userIds.length === 0) return
+
+    for (const userId of userIds) {
+      try {
+        // Ensure we have the user's device keys
+        await this.cryptoManager.updateTrackedUsers([userId])
+        const keysQueryRequest = await this.cryptoManager.queryKeysForUsers([userId])
+        if (keysQueryRequest) {
+          const queryResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
+          await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
+        }
+
+        // Establish Olm sessions if needed
+        const claimRequest = await this.cryptoManager.getMissingSessions([userId])
+        if (claimRequest) {
+          const claimResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(claimRequest)
+          await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
+        }
+
+        // Export and share historical keys
+        const { toDeviceMessages, keyCount } = await this.cryptoManager.shareHistoricalRoomKeys(roomId, userId)
+        if (keyCount > 0) {
+          const txnId = `odin_keyshare_${Date.now()}_${Math.random().toString(36).slice(2)}`
+          await this.commandAPI.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
+          log.info(`Shared ${keyCount} historical keys with ${userId} for room ${roomId}`)
+        }
+      } catch (err) {
+        log.warn(`Failed to share historical keys with ${userId}: ${err.message}`)
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to share historical keys for room ${roomId}: ${err.message}`)
+  }
 }
 
 Project.prototype.leaveLayer = async function (layerId) {
@@ -365,46 +429,19 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           }))
         await streamHandler.membershipChanged(membership)
 
-        // Share historical Megolm session keys with newly joined members
-        // so they can decrypt existing layer content during replay.
+        // Safety net: share historical keys with newly joined members.
+        // Primary key sharing happens at share/invite time (see shareLayer),
+        // but this catches keys created between share and join.
         if (this.cryptoManager) {
           const myUserId = this.timelineAPI.credentials().user_id
-          const newJoins = content
+          const newJoinUserIds = content
             .filter(event => event.type === M_ROOM_MEMBER)
             .filter(event => event.content.membership === 'join')
-            .filter(event => event.state_key !== myUserId) // don't share with ourselves
-          
-          for (const event of newJoins) {
-            try {
-              const userId = event.state_key
-              const log = getLogger()
-              log.info(`New member ${userId} joined room ${roomId}, sharing historical keys`)
+            .filter(event => event.state_key !== myUserId)
+            .map(event => event.state_key)
 
-              // Ensure we have the new user's device keys
-              await this.cryptoManager.updateTrackedUsers([userId])
-              const keysQueryRequest = await this.cryptoManager.queryKeysForUsers([userId])
-              if (keysQueryRequest) {
-                const queryResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
-                await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
-              }
-
-              // Establish Olm sessions if needed
-              const claimRequest = await this.cryptoManager.getMissingSessions([userId])
-              if (claimRequest) {
-                const claimResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(claimRequest)
-                await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
-              }
-
-              // Export and share historical keys
-              const { toDeviceMessages, keyCount } = await this.cryptoManager.shareHistoricalRoomKeys(roomId, userId)
-              if (keyCount > 0) {
-                const txnId = `odin_keyshare_${Date.now()}_${Math.random().toString(36).slice(2)}`
-                await this.commandAPI.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
-                log.info(`Shared ${keyCount} historical keys with ${userId} for room ${roomId}`)
-              }
-            } catch (err) {
-              getLogger().warn(`Failed to share historical keys with ${event.state_key}: ${err.message}`)
-            }
+          if (newJoinUserIds.length > 0) {
+            await this._shareHistoricalKeysWithProjectMembers(roomId, newJoinUserIds)
           }
         }
       }
