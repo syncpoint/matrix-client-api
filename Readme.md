@@ -1,29 +1,235 @@
-# MATRIX Client API
+# @syncpoint/matrix-client-api
 
-This is a purpose built wrapper for the Matrix API and by no neans a general-purpose SDK! It creates top-level abstractions like `project-list` and `project` which are only suitable for ODINv2 replication. It's designed to support both nodejs and browser environments.
+A purpose-built Matrix client library for ODIN collaborative C2IS. Provides high-level abstractions for project/layer management, real-time synchronization, and end-to-end encryption — designed for both Node.js and browser (Electron) environments.
 
-__WARNING: As of 14mar23 the nodejs runtime must be version 18+ since it requires the (currently experimental) implementation of the fetch API!__
+> **Note:** This is not a general-purpose Matrix SDK. It creates domain-specific abstractions like `ProjectList` and `Project` tailored to ODIN's collaboration model.
 
-## http-api
-The `http-api` is a very thin layer for the Matrix http (REST-like) api. The only enhancement is the automated renewal of the access token. This API does not have any ODIN domain specific functionality.
+## Features
 
-On top of the `http-api` we have three pillars (`structure-api`, `command-api` and `timeline-api`). These APIs use ODIN domain terms like _project_ and _layer_ but the __ids used are still out of the Matrix domain__.
+- **Project & Layer Management** — Create, share, join, and leave collaborative projects and layers via Matrix spaces and rooms.
+- **End-to-End Encryption** — Transparent Megolm encryption/decryption of ODIN operations, including historical key sharing for late joiners.
+- **Real-time Sync** — Long-polling sync stream with automatic catch-up and reconnection.
+- **Role-based Access Control** — Power level mapping to ODIN roles (Owner, Administrator, Contributor, Reader).
+- **Automatic Token Refresh** — Transparent access token renewal on 401 responses.
+- **Configurable Logging** — Injectable logger with log levels (Error, Warn, Info, Debug).
 
-## structure-api
+## Requirements
 
-The `structure-api` creates ODINv2 structural components like projects (Matrix spaces) and layers (Matrix rooms), allows you to invite users to shared projects and so on. On the other hand one can enumerate existing  projects and invitations to join shared projects. You must be in state `online` to use this API. Top level abstractions must deny access to the methods of this API and/or handle errors accordingly.
+- Node.js 18+ (uses built-in `fetch`)
+- For E2EE: `@matrix-org/matrix-sdk-crypto-wasm` (peer dependency)
 
-## command-api
+## Installation
 
-The `command-api` is a _send-only_ API and is responsible for sending the _payload_ messages to the matrix server. Typically triggered by a state change of a feature or style that is embraced by a _layer_ these messages must get posted in a Matrix room.
-This API is the only one that can be used while beeing offline. All messages are queued and delivered in-order. If a client is offline there is a retry mechanism that will even work if ODIN gets shut-down and restarted. (TODO :-))
+```bash
+npm install @syncpoint/matrix-client-api
+```
 
-## timeline-api
+## Quick Start
 
-The `timeline-api` is a _receive-only_ API and is intended to transfer changes from the matrix server to ODINv2. By making use of filters the API can be focused on the _project list_ or a selected _project_ (making use of room ids).
+```javascript
+import { MatrixClient, setLogger, consoleLogger, LEVELS } from '@syncpoint/matrix-client-api'
 
-## project-list
+setLogger(consoleLogger(LEVELS.INFO))
 
-The _project-list_ targets the ODINv2 view where projects are shared and joined. This API requires the _structure-api_ and the _timeline-api_. With the exception of _user-ids_ for invitations only ids from the ODIN domain are visible to users of this API. _project-list_ holds a mapping from ODIN ids to Matrix ids.
+const client = MatrixClient({
+  home_server_url: 'https://matrix.example.com',
+  user_id: '@alice:example.com',
+  password: 'secret',
+  encryption: { enabled: true }       // optional: enable E2EE
+})
 
-## project
+// Connect and authenticate
+await client.connect(new AbortController())
+const projectList = await client.projectList()
+
+// List projects
+await projectList.hydrate()
+const projects = await projectList.joined()
+
+// Open a project
+const project = await client.project(projectList.credentials())
+const structure = await project.hydrate({ id: projects[0].id, upstreamId: projects[0].upstreamId })
+
+// Stream live changes
+project.start(null, {
+  received: ({ id, operations }) => console.log(`Layer ${id}: ${operations.length} ops`),
+  renamed: (items) => items.forEach(r => console.log(`Renamed: ${r.name}`)),
+  roleChanged: (roles) => roles.forEach(r => console.log(`Role: ${r.role.self}`)),
+  error: (err) => console.error(err)
+})
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  MatrixClient (factory)                                 │
+│                                                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────┐  │
+│  │ ProjectList │  │   Project   │  │ CryptoManager  │  │
+│  └──────┬──────┘  └──────┬──────┘  └───────┬────────┘  │
+│         │                │                  │           │
+│  ┌──────┴──────────────────────────────────┘           │
+│  │                                                     │
+│  │  ┌──────────────┐ ┌────────────┐ ┌──────────────┐  │
+│  │  │ StructureAPI │ │ CommandAPI │ │ TimelineAPI  │  │
+│  │  └──────┬───────┘ └─────┬──────┘ └──────┬───────┘  │
+│  │         │               │               │          │
+│  │         └───────────────┼───────────────┘          │
+│  │                         │                          │
+│  │                  ┌──────┴──────┐                    │
+│  │                  │   HttpAPI   │                    │
+│  │                  └─────────────┘                    │
+│  │                                                     │
+│  └─────────────────────────────────────────────────────┘
+```
+
+### API Layers
+
+**HttpAPI** — Thin wrapper over the Matrix Client-Server API with automatic token refresh. All other APIs build on this.
+
+**StructureAPI** — Creates and queries ODIN structural components: projects (Matrix spaces) and layers (Matrix rooms). Handles invitations, joins, power levels, and room hierarchy.
+
+**CommandAPI** — Send-only API with ordered queue. Schedules ODIN operations for delivery. Transparently encrypts messages when E2EE is enabled. Supports async callback functions in the queue for post-send actions.
+
+**TimelineAPI** — Receive-only API. Consumes the Matrix sync stream and message history. Transparently decrypts incoming events. Provides both initial catch-up (via `/messages`) and live streaming (via `/sync` long-poll).
+
+**CryptoManager** — Wraps the `@matrix-org/matrix-sdk-crypto-wasm` OlmMachine. Handles key upload, device tracking, Olm/Megolm session management, and historical key sharing.
+
+## End-to-End Encryption
+
+E2EE is configured per project. When enabled:
+
+1. **Outgoing operations** are Megolm-encrypted by the CommandAPI before sending.
+2. **Incoming events** are transparently decrypted by the TimelineAPI.
+3. **Historical keys** are shared with new members via Olm-encrypted `to_device` messages, ensuring late joiners can decrypt existing layer content.
+4. **Power levels** are configured so that `m.room.encrypted` events require the same permission level as `io.syncpoint.odin.operation` (Contributor).
+
+### Historical Key Sharing
+
+When a user shares a layer that already has content:
+
+1. Content is posted to the layer (encrypted via Megolm).
+2. After posting, all Megolm session keys for the room are exported.
+3. Keys are Olm-encrypted per-device for each project member.
+4. Keys are sent as `m.room.encrypted` to_device messages (type `io.syncpoint.odin.room_keys` after Olm decryption).
+5. The Matrix server queues `to_device` messages for offline recipients.
+6. On the receiving side, `receiveSyncChanges()` intercepts decrypted key events and imports them via `importRoomKeys()`.
+
+This ensures that members who join later — even when the sharer is offline — can decrypt all existing content.
+
+### Encryption Configuration
+
+```javascript
+// Per-project encryption (as used in ODIN)
+const client = MatrixClient({
+  home_server_url: 'https://matrix.example.com',
+  user_id: '@alice:example.com',
+  password: 'secret',
+  encryption: {
+    enabled: true,
+    storeName: 'crypto-<projectUUID>',    // persistent IndexedDB store (Electron/browser)
+    passphrase: 'optional-store-passphrase'
+  }
+})
+```
+
+## Roles & Power Levels
+
+| Role | Level | Can Send Operations | Can Manage | Can Admin |
+|------|-------|-------------------|------------|-----------|
+| Owner | 111 | ✅ | ✅ | ✅ |
+| Administrator | 100 | ✅ | ✅ | ✅ |
+| Contributor | 25 | ✅ | ❌ | ❌ |
+| Reader | 0 | ❌ | ❌ | ❌ |
+
+## Playground CLI
+
+An interactive CLI for testing the library is included in `playground/`.
+
+```bash
+cd playground
+cp .env.example .env
+# Edit .env with your Matrix credentials
+node cli.mjs
+```
+
+### Configuration (.env)
+
+```
+MATRIX_HOMESERVER=http://localhost:8008
+MATRIX_USER=@alice:odin.battlefield
+MATRIX_PASSWORD=Alice
+MATRIX_ENCRYPTION=true
+```
+
+### Commands
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| Connection | `login` | Connect and authenticate |
+| | `discover` | Check homeserver availability |
+| | `whoami` | Show current credentials |
+| Projects | `projects` | List joined projects |
+| | `invited` | List project invitations |
+| | `share <id> <name> [--encrypted]` | Share a new project |
+| | `join <id>` | Join an invited project |
+| | `invite <pid> <uid>` | Invite user to project |
+| | `members <id>` | List project members |
+| Project | `open <id>` | Open a project by ODIN id |
+| | `layer-share <id> <name> [--encrypted]` | Share a new layer |
+| | `layer-join <id>` | Join a layer |
+| | `layer-content <id>` | Fetch layer operations |
+| | `post <lid> <json>` | Post operations to a layer |
+| | `send <lid> <text>` | Send plain message (testing) |
+| Streaming | `listen` | Stream live changes |
+| | `stop` | Stop streaming |
+| E2EE | `crypto-status` | Show OlmMachine status |
+| Settings | `loglevel <n>` | Set log level (0=ERROR..3=DEBUG) |
+
+Session credentials are cached in `.state.json` for convenience.
+
+## Testing
+
+### Unit Tests
+
+```bash
+npm test
+```
+
+### E2E Integration Tests (against Tuwunel)
+
+The E2E tests run against a real Matrix homeserver (Tuwunel) in Docker:
+
+```bash
+# Start the test homeserver
+cd test-e2e
+docker compose up -d
+cd ..
+
+# Run E2E tests
+npm run test:e2e
+```
+
+Test suites:
+- **e2ee.test.mjs** — Low-level crypto: key upload, room encryption, encrypt/decrypt round-trip
+- **matrix-client-api.test.mjs** — Full API stack: StructureAPI, CommandAPI, TimelineAPI with E2EE
+- **content-after-join.test.mjs** — Historical key sharing: Alice posts encrypted content → shares keys → Bob joins → Bob decrypts
+
+## Compatibility
+
+Tested against:
+- **Synapse** (reference Matrix homeserver)
+- **Tuwunel** (Conduit fork) — with fixes for state event delivery differences
+
+### Tuwunel Specifics
+
+Tuwunel may deliver room state events differently than Synapse:
+- State events for new rooms may appear only in the timeline, not in the `state` block during initial sync.
+- The `timeline` object may be omitted entirely for rooms with no new events.
+
+The library handles both behaviors transparently.
+
+## License
+
+See [LICENSE](LICENSE).
