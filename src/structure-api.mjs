@@ -270,7 +270,8 @@ class StructureAPI {
           'm.room.encryption': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.space.child': power.ROLES.PROJECT.CONTRIBUTOR.powerlevel,
           'm.room.topic': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
-          'm.reaction': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel
+          'm.reaction': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.encrypted': power.ROLES.PROJECT.CONTRIBUTOR.powerlevel
         },
         'events_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
         'state_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
@@ -359,7 +360,8 @@ class StructureAPI {
           'm.room.server_acl': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.encryption': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.space.parent': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
-          'io.syncpoint.odin.operation': power.ROLES.LAYER.CONTRIBUTOR.powerlevel
+          'io.syncpoint.odin.operation': power.ROLES.LAYER.CONTRIBUTOR.powerlevel,
+          'm.room.encrypted': power.ROLES.LAYER.CONTRIBUTOR.powerlevel
         },
         'events_default': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
         'state_default': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
