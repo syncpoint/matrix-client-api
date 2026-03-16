@@ -76,7 +76,9 @@ class StructureAPI {
     const projects = {}
 
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
-      const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
+      const stateEvents = content.state?.events || []
+      const timelineStateEvents = (content.timeline?.events || []).filter(e => 'state_key' in e)
+      const room = [...stateEvents, ...timelineStateEvents].reduce(roomStateReducer, { room_id: roomId })
       if (room.type === 'm.space' && room.id) {
         projects[roomId] = room
       }
@@ -169,7 +171,9 @@ class StructureAPI {
     let space = undefined
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       if (!allRoomIds.includes(roomId)) continue
-      const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
+      const stateEvents = content.state?.events || []
+      const timelineStateEvents = (content.timeline?.events || []).filter(e => 'state_key' in e)
+      const room = [...stateEvents, ...timelineStateEvents].reduce(roomStateReducer, { room_id: roomId })
       const scope = (roomId === globalId) 
                     ? power.SCOPE.PROJECT
                     : power.SCOPE.LAYER
