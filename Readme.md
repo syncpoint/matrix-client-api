@@ -134,6 +134,85 @@ const client = MatrixClient({
 })
 ```
 
+### Device Verification (SAS)
+
+Devices can be interactively verified using the [Short Authentication String (SAS)](https://spec.matrix.org/v1.12/client-server-api/#short-authentication-string-sas-verification) method. Both users compare 7 emojis displayed on their screens — if they match, the devices are mutually verified.
+
+```javascript
+// Alice initiates verification of Bob's device
+const { request, toDeviceRequest } = await crypto.requestVerification(bobUserId, bobDeviceId)
+await httpAPI.sendOutgoingCryptoRequest(toDeviceRequest)
+
+// Bob receives and accepts (after sync)
+const requests = crypto.getVerificationRequests(aliceUserId)
+const acceptRequest = crypto.acceptVerification(requests[0])
+await httpAPI.sendOutgoingCryptoRequest(acceptRequest)
+
+// Alice starts SAS (after sync)
+const { sas, request: sasRequest } = await crypto.startSas(request)
+await httpAPI.sendOutgoingCryptoRequest(sasRequest)
+
+// Bob gets SAS and accepts (after sync)
+const bobSas = crypto.getSas(bobRequest)
+await httpAPI.sendOutgoingCryptoRequest(bobSas.accept())
+
+// Both see emojis (after sync)
+const emojis = crypto.getEmojis(sas)
+// → [{symbol: '🎸', description: 'Guitar'}, {symbol: '📕', description: 'Book'}, ...]
+
+// Both confirm match
+const outgoing = await crypto.confirmSas(sas)
+for (const req of outgoing) await httpAPI.sendOutgoingCryptoRequest(req)
+
+// Check verification status
+await crypto.isDeviceVerified(bobUserId, bobDeviceId) // → true
+await crypto.getDeviceVerificationStatus(bobUserId)
+// → [{deviceId: 'BOB_DEVICE', verified: true, locallyTrusted: true, crossSigningTrusted: false}]
+```
+
+#### Verification API
+
+| Method | Description |
+|--------|-------------|
+| `requestVerification(userId, deviceId)` | Initiate SAS verification |
+| `getVerificationRequests(userId)` | List pending requests for a user |
+| `getVerificationRequest(userId, flowId)` | Get specific request by flow ID |
+| `acceptVerification(request)` | Accept incoming request (SAS method) |
+| `startSas(request)` | Transition accepted request to SAS flow |
+| `getSas(request)` | Get SAS state machine from request |
+| `getEmojis(sas)` | Get 7 emoji objects `{symbol, description}` |
+| `confirmSas(sas)` | Confirm emojis match → device verified |
+| `cancelSas(sas)` | Cancel SAS flow |
+| `cancelVerification(request)` | Cancel verification request |
+| `isDeviceVerified(userId, deviceId)` | Check if device is trusted |
+| `getDeviceVerificationStatus(userId)` | All devices with trust details |
+| `getVerificationPhase(request)` | Current phase name (Created/Requested/Ready/Transitioned/Done/Cancelled) |
+
+#### Verification Flow
+
+```
+Alice                              Bob
+  │  requestVerification()           │
+  ├─────── m.key.verification.request ──────►│
+  │                                  │  acceptVerification()
+  │◄──────── m.key.verification.ready ───────┤
+  │  startSas()                      │
+  ├──────── m.key.verification.start ────────►│
+  │                                  │  sas.accept()
+  │◄─────── m.key.verification.accept ───────┤
+  │                                  │
+  │◄──── m.key.verification.key (exchange) ──►│
+  │                                  │
+  │  🎸 📕 🐢 🎅 🚂 🍄 🐧          │  🎸 📕 🐢 🎅 🚂 🍄 🐧
+  │  "Do these match?" [Yes]         │  "Do these match?" [Yes]
+  │                                  │
+  │  confirmSas()                    │  confirmSas()
+  │◄──── m.key.verification.mac ─────────────►│
+  │◄──── m.key.verification.done ────────────►│
+  │                                  │
+  │  ✅ Bob verified                 │  ✅ Alice verified
+```
+
 ## Roles & Power Levels
 
 | Role | Level | Can Send Operations | Can Manage | Can Admin |
