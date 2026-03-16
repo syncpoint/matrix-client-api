@@ -376,21 +376,6 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     */
     await streamHandler.streamToken(chunk.next_batch)
 
-    // Process state events (membership changes visible even with not_senders filter)
-    if (chunk.stateEvents && Object.keys(chunk.stateEvents).length > 0) {
-      const myUserId = this.timelineAPI.credentials().user_id
-      for (const [roomId, events] of Object.entries(chunk.stateEvents)) {
-        const myJoin = events.find(e =>
-          e.type === M_ROOM_MEMBER &&
-          e.state_key === myUserId &&
-          e.content?.membership === 'join'
-        )
-        if (myJoin) {
-          await streamHandler.selfJoined({ roomId, id: this.idMapping.get(roomId) })
-        }
-      }
-    }
-
     if (Object.keys(chunk.events).length === 0) continue
 
     Object.entries(chunk.events).forEach(async ([roomId, content]) => {
