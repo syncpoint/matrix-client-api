@@ -139,7 +139,19 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     await httpAPI.processOutgoingCryptoRequests(cryptoManager)
   }
 
+  const stateEvents = {}
+
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
+    // Collect state events (membership changes, power levels, etc.)
+    if (content.state?.events?.length) {
+      stateEvents[roomId] = content.state.events
+    }
+    // Also include state events from timeline (Tuwunel puts them there)
+    const timelineState = (content.timeline?.events || []).filter(e => 'state_key' in e)
+    if (timelineState.length) {
+      stateEvents[roomId] = [...(stateEvents[roomId] || []), ...timelineState]
+    }
+
     if (!content.timeline?.events?.length) continue
 
     events[roomId] = content.timeline.events
@@ -200,7 +212,8 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   return {
     since,
     next_batch: syncResult.next_batch,
-    events
+    events,
+    stateEvents
   }
 }
 
