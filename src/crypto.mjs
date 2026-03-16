@@ -10,7 +10,9 @@ import {
   RoomSettings,
   EncryptionAlgorithm,
   DecryptionSettings,
-  TrustRequirement
+  TrustRequirement,
+  VerificationMethod,
+  VerificationRequestPhase
 } from '@matrix-org/matrix-sdk-crypto-wasm'
 import { getLogger } from './logger.mjs'
 
@@ -277,31 +279,6 @@ class CryptoManager {
 
   /**
    * Share all historical Megolm session keys for a room with a specific user.
-   * Keys are Olm-encrypted per-device and returned as to_device payloads.
-   *
-   * Used when inviting a user to an encrypted room so they can decrypt
-   * existing content during replay/catch-up.
-   *
-   * Requires that the target user's devices are already tracked (call
-   * updateTrackedUsers + queryKeysForUsers first) and Olm sessions are
-   * established (call getMissingSessions first).
-   *
-   * @param {string} roomId
-   * @param {string} userId - the invited user
-   * @returns {{ toDeviceMessages: Object, keyCount: number }} messages keyed by device_id, and count of keys shared
-   */
-  /**
-   * Share all historical Megolm session keys for a room with a specific user.
-   * Keys are sent as a custom to_device event. The exported key data contains
-   * only the session keys (not the private signing keys), which is the same
-   * data that server-side key backup would store.
-   *
-   * @param {string} roomId
-   * @param {string} userId - the target user
-   * @returns {{ toDeviceMessages: Object, keyCount: number }}
-   */
-  /**
-   * Share all historical Megolm session keys for a room with a specific user.
    * Keys are Olm-encrypted per-device and sent as m.room.encrypted to_device.
    * After Olm decryption on the receiving side, the inner event type is
    * io.syncpoint.odin.room_keys with the exported session keys as content.
@@ -349,6 +326,182 @@ class CryptoManager {
     return { toDeviceMessages: { [userId]: messages }, keyCount: keys.length }
   }
 
+  // ─── Device Verification (SAS) ─────────────────────────────────────
+
+  /**
+   * Request interactive SAS verification with a specific user's device.
+   * Sends an m.key.verification.request to_device event.
+   *
+   * @param {string} userId - the user to verify
+   * @param {string} deviceId - the device to verify
+   * @returns {{ request: VerificationRequest, toDeviceRequest: Object }} the request object and outgoing to_device message
+   */
+  async requestVerification (userId, deviceId) {
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    const log = getLogger()
+    const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
+    const device = userDevices.get(new DeviceId(deviceId))
+    if (!device) throw new Error(`Device ${deviceId} not found for ${userId}`)
+
+    const [request, toDeviceRequest] = device.requestVerification(
+      [VerificationMethod.SasV1]
+    )
+    log.info(`Verification requested for ${userId} device ${deviceId}`)
+    return { request, toDeviceRequest }
+  }
+
+  /**
+   * Get a pending verification request for a user.
+   *
+   * @param {string} userId
+   * @param {string} flowId - the verification flow id
+   * @returns {VerificationRequest|undefined}
+   */
+  getVerificationRequest (userId, flowId) {
+    if (!this.olmMachine) return undefined
+    return this.olmMachine.getVerificationRequest(new UserId(userId), flowId)
+  }
+
+  /**
+   * Get all pending verification requests for a user.
+   *
+   * @param {string} userId
+   * @returns {VerificationRequest[]}
+   */
+  getVerificationRequests (userId) {
+    if (!this.olmMachine) return []
+    return this.olmMachine.getVerificationRequests(new UserId(userId))
+  }
+
+  /**
+   * Accept an incoming verification request and signal support for SAS.
+   * Returns an outgoing request to send.
+   *
+   * @param {VerificationRequest} request
+   * @returns {Object|undefined} outgoing ToDeviceRequest or RoomMessageRequest
+   */
+  acceptVerification (request) {
+    return request.acceptWithMethods([VerificationMethod.SasV1])
+  }
+
+  /**
+   * Transition a ready verification request into SAS verification.
+   * Both sides must have accepted before calling this.
+   *
+   * @param {VerificationRequest} request
+   * @returns {{ sas: Sas, request: Object }|undefined} the SAS state machine and outgoing request
+   */
+  async startSas (request) {
+    if (!request.isReady()) return undefined
+    const result = await request.startSas()
+    if (!result) return undefined
+    const [sas, outgoingRequest] = result
+    getLogger().info('SAS verification started')
+    return { sas, request: outgoingRequest }
+  }
+
+  /**
+   * Get the SAS object from a transitioned verification request.
+   *
+   * @param {VerificationRequest} request
+   * @returns {Sas|undefined}
+   */
+  getSas (request) {
+    return request.getVerification()
+  }
+
+  /**
+   * Get the 7 emojis for SAS comparison.
+   * Both sides display these emojis — if they match, the verification is genuine.
+   *
+   * @param {Sas} sas
+   * @returns {Array<{symbol: string, description: string}>|undefined}
+   */
+  getEmojis (sas) {
+    if (!sas.canBePresented()) return undefined
+    const emojis = sas.emoji()
+    if (!emojis) return undefined
+    return emojis.map(e => ({ symbol: e.symbol, description: e.description }))
+  }
+
+  /**
+   * Confirm that the SAS emojis match.
+   * This marks the other device as verified.
+   *
+   * @param {Sas} sas
+   * @returns {Object[]} array of outgoing requests to send (signatures, done events)
+   */
+  async confirmSas (sas) {
+    const requests = await sas.confirm()
+    getLogger().info('SAS verification confirmed')
+    return requests || []
+  }
+
+  /**
+   * Cancel a SAS verification.
+   *
+   * @param {Sas} sas
+   * @returns {Object|undefined} outgoing cancel request
+   */
+  cancelSas (sas) {
+    return sas.cancel()
+  }
+
+  /**
+   * Cancel a verification request (before SAS has started).
+   *
+   * @param {VerificationRequest} request
+   * @returns {Object|undefined} outgoing cancel request
+   */
+  cancelVerification (request) {
+    return request.cancel()
+  }
+
+  /**
+   * Check if a specific device is verified (cross-signed or locally trusted).
+   *
+   * @param {string} userId
+   * @param {string} deviceId
+   * @returns {boolean}
+   */
+  async isDeviceVerified (userId, deviceId) {
+    if (!this.olmMachine) return false
+    const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
+    const device = userDevices.get(new DeviceId(deviceId))
+    if (!device) return false
+    return device.isCrossSigningTrusted() || device.isLocallyTrusted()
+  }
+
+  /**
+   * Get verification status for all devices of a user.
+   *
+   * @param {string} userId
+   * @returns {Array<{deviceId: string, verified: boolean, locallyTrusted: boolean, crossSigningTrusted: boolean}>}
+   */
+  async getDeviceVerificationStatus (userId) {
+    if (!this.olmMachine) return []
+    const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
+    const devices = userDevices.devices()
+    return devices.map(d => ({
+      deviceId: d.deviceId.toString(),
+      verified: d.isCrossSigningTrusted() || d.isLocallyTrusted(),
+      locallyTrusted: d.isLocallyTrusted(),
+      crossSigningTrusted: d.isCrossSigningTrusted()
+    }))
+  }
+
+  /**
+   * Get the current phase of a verification request.
+   *
+   * @param {VerificationRequest} request
+   * @returns {string} phase name: 'Created', 'Requested', 'Ready', 'Transitioned', 'Done', 'Cancelled'
+   */
+  getVerificationPhase (request) {
+    const phase = request.phase()
+    const names = { 0: 'Created', 1: 'Requested', 2: 'Ready', 3: 'Transitioned', 4: 'Done', 5: 'Cancelled' }
+    return names[phase] || `Unknown(${phase})`
+  }
+
   /**
    * Close the crypto store and release resources.
    * After closing, the CryptoManager must be re-initialized before use.
@@ -383,4 +536,4 @@ class CryptoManager {
   }
 }
 
-export { CryptoManager, RequestType }
+export { CryptoManager, RequestType, VerificationMethod, VerificationRequestPhase }

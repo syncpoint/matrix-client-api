@@ -7,7 +7,7 @@ import { Project } from './src/project.mjs'
 import { discover, errors } from './src/discover-api.mjs'
 import { setLogger, LEVELS, consoleLogger, noopLogger } from './src/logger.mjs'
 import { chill } from './src/convenience.mjs'
-import { CryptoManager } from './src/crypto.mjs'
+import { CryptoManager, VerificationMethod, VerificationRequestPhase } from './src/crypto.mjs'
 
 /*
   connect() resolves if the home_server can be connected. It does
@@ -134,6 +134,8 @@ const MatrixClient = (loginData) => {
 export {
   MatrixClient,
   CryptoManager,
+  VerificationMethod,
+  VerificationRequestPhase,
   connect,
   discover,
   setLogger,
