@@ -96,7 +96,8 @@ ProjectList.prototype.join = async function (projectId) {
 
   return {
     id: projectId,
-    upstreamId
+    upstreamId,
+    encrypted: !!project.encryption
   }
 }
 
