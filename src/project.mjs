@@ -264,8 +264,9 @@ Project.prototype.content = async function (layerId) {
   const filter = { 
       lazy_load_members: true, // improve performance
       limit: 1000, 
-      types: [ODINv2_MESSAGE_TYPE],
-      not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
+      types: [ODINv2_MESSAGE_TYPE]
+      // No not_senders filter: on (re-)join we need ALL events
+      // including our own to reconstruct the full layer state.
     }
 
   const upstreamId = this.idMapping.get(layerId)
