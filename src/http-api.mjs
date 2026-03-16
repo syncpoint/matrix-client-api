@@ -362,16 +362,8 @@ HttpAPI.prototype.getMessages = async function (roomId, options) {
   return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams }).json()
 }
 
-HttpAPI.prototype.sendToDevice = async function (deviceId, eventType, content = {}, txnId = randomUUID()) {
-  const toDeviceMessage = {}
-  toDeviceMessage[deviceId] = content
-
-  const body = {
-    messages: {}
-  }
-
-  body.messages[this.credentials.user_id] = toDeviceMessage
-
+HttpAPI.prototype.sendToDevice = async function (eventType, txnId = randomUUID(), messages = {}) {
+  const body = { messages }
   return this.client.put(`v3/sendToDevice/${encodeURIComponent(eventType)}/${encodeURIComponent(txnId)}`, {
     json: body
   }).json()

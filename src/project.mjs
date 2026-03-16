@@ -364,6 +364,49 @@ Project.prototype.start = async function (streamToken, handler = {}) {
             subject: event.state_key
           }))
         await streamHandler.membershipChanged(membership)
+
+        // Share historical Megolm session keys with newly joined members
+        // so they can decrypt existing layer content during replay.
+        if (this.cryptoManager) {
+          const myUserId = this.timelineAPI.credentials().user_id
+          const newJoins = content
+            .filter(event => event.type === M_ROOM_MEMBER)
+            .filter(event => event.content.membership === 'join')
+            .filter(event => event.state_key !== myUserId) // don't share with ourselves
+          
+          for (const event of newJoins) {
+            try {
+              const userId = event.state_key
+              const log = getLogger()
+              log.info(`New member ${userId} joined room ${roomId}, sharing historical keys`)
+
+              // Ensure we have the new user's device keys
+              await this.cryptoManager.updateTrackedUsers([userId])
+              const keysQueryRequest = await this.cryptoManager.queryKeysForUsers([userId])
+              if (keysQueryRequest) {
+                const queryResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
+                await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
+              }
+
+              // Establish Olm sessions if needed
+              const claimRequest = await this.cryptoManager.getMissingSessions([userId])
+              if (claimRequest) {
+                const claimResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(claimRequest)
+                await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
+              }
+
+              // Export and share historical keys
+              const { toDeviceMessages, keyCount } = await this.cryptoManager.shareHistoricalRoomKeys(roomId, userId)
+              if (keyCount > 0) {
+                const txnId = `odin_keyshare_${Date.now()}_${Math.random().toString(36).slice(2)}`
+                await this.commandAPI.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
+                log.info(`Shared ${keyCount} historical keys with ${userId} for room ${roomId}`)
+              }
+            } catch (err) {
+              getLogger().warn(`Failed to share historical keys with ${event.state_key}: ${err.message}`)
+            }
+          }
+        }
       }
 
       if (isODINExtensionMessage(content)) {
