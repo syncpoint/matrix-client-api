@@ -131,13 +131,6 @@ Project.prototype.shareLayer = async function (layerId, name, description, optio
   await this.structureAPI.addLayerToProject(this.idMapping.get(this.projectId), layer.globalId)
   this.idMapping.remember(layerId, layer.globalId)
 
-  // Share historical Megolm keys with all project members at share time.
-  // This ensures that members who join later (even when we're offline) can
-  // decrypt the layer content, because to_device messages are queued server-side.
-  if (this.cryptoManager && options.encrypted) {
-    await this._shareHistoricalKeysWithProjectMembers(layer.globalId)
-  }
-
   return {
     id: layerId,
     upstreamId: layer.globalId,
@@ -165,9 +158,26 @@ Project.prototype.joinLayer = async function (layerId) {
 }
 
 /**
- * Share all historical Megolm session keys for a room with all project members.
- * Used at share time (when creating/sharing a layer) and when new members join.
- * to_device messages are queued server-side, so offline recipients get them on next sync.
+ * Schedule sharing of all historical Megolm session keys for a layer
+ * with all project members. The sharing is enqueued in the command queue
+ * so it executes AFTER any pending content posts have been sent and
+ * encrypted (ensuring the session keys actually exist).
+ *
+ * to_device messages are queued server-side, so offline recipients
+ * get them on next sync.
+ *
+ * @param {string} layerId - the local layer id
+ */
+Project.prototype.shareHistoricalKeys = function (layerId) {
+  if (!this.cryptoManager) return
+  const roomId = this.idMapping.get(layerId)
+  if (!roomId) return
+  this.commandAPI.schedule([async () => {
+    await this._shareHistoricalKeysWithProjectMembers(roomId)
+  }])
+}
+
+/**
  * @private
  */
 Project.prototype._shareHistoricalKeysWithProjectMembers = async function (roomId, targetUserIds) {

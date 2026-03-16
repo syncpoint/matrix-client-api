@@ -21,6 +21,11 @@ class CommandAPI {
    */
   schedule (functionCall) {
     const [functionName] = functionCall
+    // Allow scheduling async callback functions directly
+    if (typeof functionName === 'function') {
+      this.scheduledCalls.enqueue(functionCall)
+      return
+    }
     if (!this.httpAPI[functionName]) throw new Error(`HttpAPI: property ${functionName} does not exist`)
     if (typeof this.httpAPI[functionName] !== 'function') throw new Error(`HttpAPI: ${functionName} is not a function`)
     this.scheduledCalls.enqueue(functionCall)
@@ -54,6 +59,13 @@ class CommandAPI {
 
         functionCall = await this.scheduledCalls.dequeue()
         let [functionName, ...params] = functionCall
+
+        // Execute callback functions scheduled in the queue
+        if (typeof functionName === 'function') {
+          await functionName(...params)
+          retryCounter = 0
+          continue
+        }
 
         // Encrypt outgoing message events if crypto is available
         if (this.cryptoManager && functionName === 'sendMessageEvent') {
