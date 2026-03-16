@@ -219,7 +219,7 @@ Project.prototype._shareHistoricalKeysWithProjectMembers = async function (roomI
         const { toDeviceMessages, keyCount } = await this.cryptoManager.shareHistoricalRoomKeys(roomId, userId)
         if (keyCount > 0) {
           const txnId = `odin_keyshare_${Date.now()}_${Math.random().toString(36).slice(2)}`
-          await this.commandAPI.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
+          await this.commandAPI.httpAPI.sendToDevice('io.syncpoint.odin.room_keys', txnId, toDeviceMessages)
           log.info(`Shared ${keyCount} historical keys with ${userId} for room ${roomId}`)
         }
       } catch (err) {

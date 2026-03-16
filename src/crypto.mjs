@@ -93,6 +93,22 @@ class CryptoManager {
     if (!this.olmMachine) return
     const log = getLogger()
 
+    // Intercept ODIN historical key sharing events BEFORE passing to OlmMachine.
+    // These are unencrypted custom to_device events that OlmMachine doesn't understand.
+    const filteredEvents = []
+    for (const event of (toDeviceEvents || [])) {
+      if (event.type === 'io.syncpoint.odin.room_keys') {
+        const keys = event.content?.keys
+        const roomId = event.content?.room_id
+        if (keys && keys.length > 0) {
+          log.info(`Received ${keys.length} historical room keys for room ${roomId}`)
+          await this.importRoomKeys(JSON.stringify(keys))
+        }
+      } else {
+        filteredEvents.push(event)
+      }
+    }
+
     const changed = (changedDeviceLists?.changed || []).map(id => new UserId(id))
     const left = (changedDeviceLists?.left || []).map(id => new UserId(id))
     const deviceLists = new DeviceLists(changed, left)
@@ -103,33 +119,11 @@ class CryptoManager {
       : null
 
     const result = await this.olmMachine.receiveSyncChanges(
-      JSON.stringify(toDeviceEvents || []),
+      JSON.stringify(filteredEvents),
       deviceLists,
       otkeyCounts,
       fallbackKeys
     )
-
-    // Check for ODIN historical key sharing events in the decrypted to_device result.
-    // These are Olm-encrypted events that the OlmMachine has decrypted for us.
-    try {
-      const processed = JSON.parse(result)
-      const keyEvents = (processed || []).filter(e =>
-        e.type === 'io.syncpoint.odin.room_keys' ||
-        (e.content?.type === 'io.syncpoint.odin.room_keys')
-      )
-      for (const event of keyEvents) {
-        const content = event.content || event
-        const keys = content.keys
-        const roomId = content.room_id
-        if (keys && keys.length > 0) {
-          log.info(`Received ${keys.length} historical room keys for room ${roomId}`)
-          await this.importRoomKeys(JSON.stringify(keys))
-        }
-      }
-    } catch (err) {
-      // Result parsing may fail if it's not JSON array – that's fine, no key events
-      log.debug('No ODIN key events in sync result')
-    }
 
     log.debug('Sync changes processed')
     return result
@@ -287,6 +281,16 @@ class CryptoManager {
    * @param {string} userId - the invited user
    * @returns {{ toDeviceMessages: Object, keyCount: number }} messages keyed by device_id, and count of keys shared
    */
+  /**
+   * Share all historical Megolm session keys for a room with a specific user.
+   * Keys are sent as a custom to_device event. The exported key data contains
+   * only the session keys (not the private signing keys), which is the same
+   * data that server-side key backup would store.
+   *
+   * @param {string} roomId
+   * @param {string} userId - the target user
+   * @returns {{ toDeviceMessages: Object, keyCount: number }}
+   */
   async shareHistoricalRoomKeys (roomId, userId) {
     if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const log = getLogger()
@@ -300,7 +304,8 @@ class CryptoManager {
 
     log.info(`Sharing ${keys.length} historical session keys for room ${roomId} with ${userId}`)
 
-    // Get the user's devices
+    // Send keys to all of the user's devices via custom to_device event.
+    // The keys are the exported Megolm session data (same format as key backup/export).
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const devices = userDevices.devices()
 
@@ -309,18 +314,11 @@ class CryptoManager {
       return { toDeviceMessages: {}, keyCount: 0 }
     }
 
-    // Encrypt the key bundle for each device using Olm
     const messages = {}
     for (const device of devices) {
-      try {
-        const content = { keys, room_id: roomId }
-        const encrypted = await device.encryptToDeviceEvent(
-          'io.syncpoint.odin.room_keys',
-          JSON.stringify(content)
-        )
-        messages[device.deviceId.toString()] = JSON.parse(encrypted)
-      } catch (err) {
-        log.warn(`Failed to encrypt keys for device ${device.deviceId}: ${err.message}`)
+      messages[device.deviceId.toString()] = {
+        keys,
+        room_id: roomId
       }
     }
 
