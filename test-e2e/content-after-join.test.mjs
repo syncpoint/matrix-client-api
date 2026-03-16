@@ -209,7 +209,7 @@ describe('Content after Join', function () {
 
     if (keyCount > 0) {
       const txnId = `keyshare_${Date.now()}`
-      await alice.httpAPI.sendToDevice('io.syncpoint.odin.room_keys', txnId, toDeviceMessages)
+      await alice.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
       console.log('Historical keys sent to Bob via to_device')
     }
 

@@ -93,22 +93,6 @@ class CryptoManager {
     if (!this.olmMachine) return
     const log = getLogger()
 
-    // Intercept ODIN historical key sharing events BEFORE passing to OlmMachine.
-    // These are unencrypted custom to_device events that OlmMachine doesn't understand.
-    const filteredEvents = []
-    for (const event of (toDeviceEvents || [])) {
-      if (event.type === 'io.syncpoint.odin.room_keys') {
-        const keys = event.content?.keys
-        const roomId = event.content?.room_id
-        if (keys && keys.length > 0) {
-          log.info(`Received ${keys.length} historical room keys for room ${roomId}`)
-          await this.importRoomKeys(JSON.stringify(keys))
-        }
-      } else {
-        filteredEvents.push(event)
-      }
-    }
-
     const changed = (changedDeviceLists?.changed || []).map(id => new UserId(id))
     const left = (changedDeviceLists?.left || []).map(id => new UserId(id))
     const deviceLists = new DeviceLists(changed, left)
@@ -119,11 +103,36 @@ class CryptoManager {
       : null
 
     const result = await this.olmMachine.receiveSyncChanges(
-      JSON.stringify(filteredEvents),
+      JSON.stringify(toDeviceEvents || []),
       deviceLists,
       otkeyCounts,
       fallbackKeys
     )
+
+    // Check for Olm-decrypted ODIN historical key sharing events.
+    // These are sent as m.room.encrypted to_device events with inner type
+    // io.syncpoint.odin.room_keys. After Olm decryption, the OlmMachine
+    // returns them as DecryptedToDeviceEvent with rawEvent containing
+    // the decrypted payload.
+    try {
+      const processed = Array.isArray(result) ? result : []
+      for (const item of processed) {
+        if (!item.rawEvent) continue
+        const raw = JSON.parse(item.rawEvent)
+        if (raw.type === 'io.syncpoint.odin.room_keys') {
+          // content is a JSON string (from encryptToDeviceEvent), parse it
+          const content = typeof raw.content === 'string' ? JSON.parse(raw.content) : raw.content
+          const keys = content?.keys
+          const roomId = content?.room_id
+          if (keys && keys.length > 0) {
+            log.info(`Received ${keys.length} historical room keys for room ${roomId}`)
+            await this.importRoomKeys(JSON.stringify(keys))
+          }
+        }
+      }
+    } catch (err) {
+      log.debug('Error processing to_device events:', err.message)
+    }
 
     log.debug('Sync changes processed')
     return result
@@ -291,6 +300,16 @@ class CryptoManager {
    * @param {string} userId - the target user
    * @returns {{ toDeviceMessages: Object, keyCount: number }}
    */
+  /**
+   * Share all historical Megolm session keys for a room with a specific user.
+   * Keys are Olm-encrypted per-device and sent as m.room.encrypted to_device.
+   * After Olm decryption on the receiving side, the inner event type is
+   * io.syncpoint.odin.room_keys with the exported session keys as content.
+   *
+   * @param {string} roomId
+   * @param {string} userId - the target user
+   * @returns {{ toDeviceMessages: Object, keyCount: number }}
+   */
   async shareHistoricalRoomKeys (roomId, userId) {
     if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const log = getLogger()
@@ -304,8 +323,6 @@ class CryptoManager {
 
     log.info(`Sharing ${keys.length} historical session keys for room ${roomId} with ${userId}`)
 
-    // Send keys to all of the user's devices via custom to_device event.
-    // The keys are the exported Megolm session data (same format as key backup/export).
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const devices = userDevices.devices()
 
@@ -314,11 +331,18 @@ class CryptoManager {
       return { toDeviceMessages: {}, keyCount: 0 }
     }
 
+    // Olm-encrypt the key bundle for each device
     const messages = {}
     for (const device of devices) {
-      messages[device.deviceId.toString()] = {
-        keys,
-        room_id: roomId
+      try {
+        const payload = JSON.stringify({ keys, room_id: roomId })
+        const encrypted = await device.encryptToDeviceEvent(
+          'io.syncpoint.odin.room_keys',
+          payload
+        )
+        messages[device.deviceId.toString()] = JSON.parse(encrypted)
+      } catch (err) {
+        log.warn(`Failed to encrypt keys for device ${device.deviceId}: ${err.message}`)
       }
     }
 
