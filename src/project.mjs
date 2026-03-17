@@ -100,7 +100,7 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
       topic: layer.topic      
     })),
     invitations: hierarchy.candidates.map(candidate => ({
-      id: Base64.encode(candidate.id),
+      id: Base64.encodeURI(candidate.id),
       name: candidate.name,
       topic: candidate.topic
     }))
@@ -230,7 +230,7 @@ Project.prototype.leaveLayer = async function (layerId) {
 
   /* an invitation to re-join the layer */
   return {
-    id: Base64.encode(upstreamId),
+    id: Base64.encodeURI(upstreamId),
     name: layer.name,
     topic: layer.topic
   }
@@ -288,7 +288,7 @@ Project.prototype.__post = async function (layerId, operations, messageType) {
     return [...collect(splittedOperations[0]), ...collect(splittedOperations[1])]
   }
 
-  const encode = operations => Base64.encode(JSON.stringify(operations))
+  const encode = operations => Base64.encodeURI(JSON.stringify(operations))
 
   const chunks = split(operations)
   const parts = collect(chunks)
@@ -378,7 +378,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         }
         
         await streamHandler.invited({
-          id: Base64.encode(childRoom.id),
+          id: Base64.encodeURI(childRoom.id),
           name: childRoom.name,
           topic: childRoom.topic
         })
