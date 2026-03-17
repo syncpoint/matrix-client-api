@@ -18,6 +18,7 @@ import {
 import { getLogger } from './logger.mjs'
 
 const NOT_INITIALIZED = 'CryptoManager not initialized'
+const ODIN_ROOM_KEYS_EVENT_TYPE = 'io.syncpoint.odin.room_keys'
 
 class CryptoManager {
   /**
@@ -125,7 +126,7 @@ class CryptoManager {
       for (const item of processed) {
         if (!item.rawEvent) continue
         const raw = JSON.parse(item.rawEvent)
-        if (raw.type === 'io.syncpoint.odin.room_keys') {
+        if (raw.type === ODIN_ROOM_KEYS_EVENT_TYPE) {
           // content is a JSON string (from encryptToDeviceEvent), parse it
           const content = typeof raw.content === 'string' ? JSON.parse(raw.content) : raw.content
           const keys = content?.keys
@@ -314,7 +315,7 @@ class CryptoManager {
       try {
         const payload = JSON.stringify({ keys, room_id: roomId })
         const encrypted = await device.encryptToDeviceEvent(
-          'io.syncpoint.odin.room_keys',
+          ODIN_ROOM_KEYS_EVENT_TYPE,
           payload
         )
         messages[device.deviceId.toString()] = JSON.parse(encrypted)
