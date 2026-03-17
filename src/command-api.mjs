@@ -59,7 +59,7 @@ class CommandAPI {
         await chill(retryCounter)
 
         entry = await this.scheduledCalls.dequeue()
-        let { command: functionCall, key } = entry
+        const { command: functionCall, key } = entry
         let [functionName, ...params] = functionCall
 
         // Execute callback functions scheduled in the queue
