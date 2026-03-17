@@ -42,6 +42,7 @@ const connect = (home_server_url) => async (controller) => {
  * @property {boolean} [encryption.enabled=false] - Enable E2EE
  * @property {string} [encryption.storeName] - IndexedDB store name for persistent crypto state (e.g. 'crypto-<projectUUID>')
  * @property {string} [encryption.passphrase] - Passphrase to encrypt the IndexedDB store
+ * @property {Object} db - A levelup-compatible database instance for the persistent command queue
  * 
  * @param {LoginData} loginData 
  * @returns {Object} matrixClient
@@ -119,7 +120,7 @@ const MatrixClient = (loginData) => {
       const projectParams = {
         structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, crypto),
-        commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null),
+        commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null, loginData.db),
         cryptoManager: crypto?.cryptoManager || null
       }
       const project = new Project(projectParams)

@@ -5,11 +5,12 @@ class CommandAPI {
   /**
    * @param {import('./http-api.mjs').HttpAPI} httpAPI
    * @param {import('./crypto.mjs').CryptoManager} [cryptoManager] - Optional CryptoManager for E2EE
+   * @param {Object} db - A levelup-compatible database instance for persistent queue storage
    */
-  constructor (httpAPI, cryptoManager) {
+  constructor (httpAPI, cryptoManager, db) {
     this.httpAPI = httpAPI
     this.cryptoManager = cryptoManager || null
-    this.scheduledCalls = new FIFO()
+    this.scheduledCalls = new FIFO(db)
   }
 
   /**
@@ -51,13 +52,14 @@ class CommandAPI {
     this.controller = new AbortController()
     
     let retryCounter = 0
-    let functionCall
+    let entry
 
     while (!this.controller.signal.aborted) {
       try {
         await chill(retryCounter)
 
-        functionCall = await this.scheduledCalls.dequeue()
+        entry = await this.scheduledCalls.dequeue()
+        let { command: functionCall, key } = entry
         let [functionName, ...params] = functionCall
 
         // Execute callback functions scheduled in the queue
@@ -134,6 +136,7 @@ class CommandAPI {
         }
 
         await this.httpAPI[functionName].apply(this.httpAPI, params)
+        await this.scheduledCalls.acknowledge(key)
         const log = getLogger()
         log.debug('Command sent:', functionName)
         retryCounter = 0
@@ -141,14 +144,14 @@ class CommandAPI {
         const log = getLogger()
         log.warn('Command failed:', error.message)
         if (error.response?.statusCode === 403) {
-          log.error('Command forbidden:', functionCall[0], error.response.body)
+          log.error('Command forbidden:', entry.command[0], error.response.body)
         }
         
         /*
           In most cases we will have to deal with socket errors. The users computer may
           be offline or the server might be unreachable.
         */
-        this.scheduledCalls.requeue(functionCall)
+        this.scheduledCalls.requeue(entry.command, entry.key)
         retryCounter++
       }
     }    
