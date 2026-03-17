@@ -27,7 +27,7 @@ npm install @syncpoint/matrix-client-api
 ## Quick Start
 
 ```javascript
-import { MatrixClient, setLogger, consoleLogger, LEVELS } from '@syncpoint/matrix-client-api'
+import { MatrixClient, setLogger, consoleLogger, LEVELS, TrustRequirement } from '@syncpoint/matrix-client-api'
 
 setLogger(consoleLogger(LEVELS.INFO))
 
@@ -121,6 +121,8 @@ This ensures that members who join later — even when the sharer is offline —
 ### Encryption Configuration
 
 ```javascript
+import { MatrixClient, CryptoManager, TrustRequirement } from '@syncpoint/matrix-client-api'
+
 // Per-project encryption (as used in ODIN)
 const client = MatrixClient({
   home_server_url: 'https://matrix.example.com',
@@ -132,6 +134,26 @@ const client = MatrixClient({
     passphrase: 'optional-store-passphrase'
   }
 })
+```
+
+### Trust Requirements
+
+The `CryptoManager` accepts a configurable trust level for decryption. This controls whether messages from unverified devices are accepted or rejected.
+
+```javascript
+// Default: accept messages from all devices (including unverified)
+const crypto = new CryptoManager()
+
+// Strict: only accept messages from cross-signed or locally trusted devices
+const crypto = new CryptoManager({ trustRequirement: TrustRequirement.CrossSignedOrLegacy })
+```
+
+Available trust levels (from `@matrix-org/matrix-sdk-crypto-wasm`):
+
+| TrustRequirement | Description |
+|------------------|-------------|
+| `Untrusted` | Accept all messages regardless of device verification status (default) |
+| `CrossSignedOrLegacy` | Only accept messages from devices that are cross-signed or locally trusted |
 ```
 
 ### Device Verification (SAS)
