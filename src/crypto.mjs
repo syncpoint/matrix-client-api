@@ -12,7 +12,8 @@ import {
   DecryptionSettings,
   TrustRequirement,
   VerificationMethod,
-  VerificationRequestPhase
+  VerificationRequestPhase,
+  EncryptionSettings
 } from '@matrix-org/matrix-sdk-crypto-wasm'
 import { getLogger } from './logger.mjs'
 
@@ -192,7 +193,6 @@ class CryptoManager {
    */
   async shareRoomKey (roomId, userIds) {
     if (!this.olmMachine) throw new Error('CryptoManager not initialized')
-    const { EncryptionSettings } = await import('@matrix-org/matrix-sdk-crypto-wasm')
     const settings = new EncryptionSettings()
     const users = userIds.map(id => new UserId(id))
     return this.olmMachine.shareRoomKey(new RoomId(roomId), users, settings)
