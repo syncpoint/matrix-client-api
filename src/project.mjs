@@ -169,6 +169,7 @@ Project.prototype.shareHistoricalKeys = function (layerId) {
  * @private
  */
 Project.prototype._shareHistoricalKeysWithProjectMembers = async function (roomId, targetUserIds) {
+  if (!this.cryptoManager) return
   const log = getLogger()
   const myUserId = this.timelineAPI.credentials().user_id
 

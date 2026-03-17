@@ -109,7 +109,6 @@ const MatrixClient = (loginData) => {
       const projectList = new ProjectList(projectListParames)
       projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
       projectList.credentials = () => (httpAPI.credentials)
-      if (crypto) projectList.cryptoManager = crypto.cryptoManager
       return projectList
     },
 
