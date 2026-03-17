@@ -80,9 +80,23 @@ TimelineAPI.prototype.content = async function (roomId, filter, from) {
   if (this.crypto && result.events) {
     const { cryptoManager } = this.crypto
     const log = getLogger()
+
+    const MAX_DECRYPT_RETRIES = 5
+    const DECRYPT_RETRY_DELAY = 500
+
     for (let i = 0; i < result.events.length; i++) {
       if (result.events[i].type === M_ROOM_ENCRYPTED) {
-        const decrypted = await cryptoManager.decryptRoomEvent(result.events[i], roomId)
+        let decrypted = null
+
+        for (let attempt = 0; attempt <= MAX_DECRYPT_RETRIES; attempt++) {
+          decrypted = await cryptoManager.decryptRoomEvent(result.events[i], roomId)
+          if (decrypted) break
+          if (attempt < MAX_DECRYPT_RETRIES) {
+            log.info(`Decrypt attempt ${attempt + 1} failed for event ${result.events[i].event_id}, waiting for keys...`)
+            await new Promise(resolve => setTimeout(resolve, DECRYPT_RETRY_DELAY))
+          }
+        }
+
         if (decrypted) {
           result.events[i] = {
             ...result.events[i],
