@@ -17,6 +17,8 @@ import {
 } from '@matrix-org/matrix-sdk-crypto-wasm'
 import { getLogger } from './logger.mjs'
 
+const NOT_INITIALIZED = 'CryptoManager not initialized'
+
 class CryptoManager {
   constructor () {
     this.olmMachine = null
@@ -70,7 +72,7 @@ class CryptoManager {
    * Returns array of request objects that the caller must execute via HTTP.
    */
   async outgoingRequests () {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     return this.olmMachine.outgoingRequests()
   }
 
@@ -81,7 +83,7 @@ class CryptoManager {
    * @param {string} responseBody - JSON-encoded response body
    */
   async markRequestAsSent (requestId, requestType, responseBody) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     await this.olmMachine.markRequestAsSent(requestId, requestType, responseBody)
   }
 
@@ -93,7 +95,7 @@ class CryptoManager {
    * @param {Array} unusedFallbackKeys - device_unused_fallback_key_types from sync response
    */
   async receiveSyncChanges (toDeviceEvents, changedDeviceLists, oneTimeKeyCounts, unusedFallbackKeys) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
 
     const changed = (changedDeviceLists?.changed || []).map(id => new UserId(id))
@@ -149,7 +151,7 @@ class CryptoManager {
    * @returns {Object} encrypted content to send as m.room.encrypted
    */
   async encryptRoomEvent (roomId, eventType, content) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const encrypted = await this.olmMachine.encryptRoomEvent(
       new RoomId(roomId),
       eventType,
@@ -165,7 +167,7 @@ class CryptoManager {
    * @returns {Object|null} decrypted event info or null on failure
    */
   async decryptRoomEvent (event, roomId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
     try {
       const decryptionSettings = new DecryptionSettings(TrustRequirement.Untrusted)
@@ -192,7 +194,7 @@ class CryptoManager {
    * @param {string[]} userIds
    */
   async shareRoomKey (roomId, userIds) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const settings = new EncryptionSettings()
     const users = userIds.map(id => new UserId(id))
     return this.olmMachine.shareRoomKey(new RoomId(roomId), users, settings)
@@ -204,7 +206,7 @@ class CryptoManager {
    * @returns {KeysClaimRequest|undefined}
    */
   async getMissingSessions (userIds) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const users = userIds.map(id => new UserId(id))
     return this.olmMachine.getMissingSessions(users)
   }
@@ -214,7 +216,7 @@ class CryptoManager {
    * @param {string[]} userIds
    */
   async updateTrackedUsers (userIds) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     await this.olmMachine.updateTrackedUsers(userIds.map(id => new UserId(id)))
   }
 
@@ -225,7 +227,7 @@ class CryptoManager {
    * @returns {Object|undefined} KeysQueryRequest or undefined
    */
   async queryKeysForUsers (userIds) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     return this.olmMachine.queryKeysForUsers(userIds.map(id => new UserId(id)))
   }
 
@@ -236,7 +238,7 @@ class CryptoManager {
    * @param {Object} [encryptionContent] - Content of the m.room.encryption state event
    */
   async setRoomEncryption (roomId, encryptionContent = {}) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
     const settings = new RoomSettings(EncryptionAlgorithm.MegolmV1AesSha2, false, false)
     await this.olmMachine.setRoomSettings(new RoomId(roomId), settings)
@@ -250,7 +252,7 @@ class CryptoManager {
    * @returns {string} JSON-encoded exported keys
    */
   async exportRoomKeys (roomId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const targetRoomId = roomId
     const exported = await this.olmMachine.exportRoomKeys(
       (session) => session.roomId.toString() === targetRoomId
@@ -264,7 +266,7 @@ class CryptoManager {
    * @returns {Object} import result with total_count and imported_count
    */
   async importRoomKeys (exportedKeys) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
     const result = await this.olmMachine.importRoomKeys(exportedKeys, (progress, total) => {
       log.debug(`Importing room keys: ${progress}/${total}`)
@@ -285,7 +287,7 @@ class CryptoManager {
    * @returns {{ toDeviceMessages: Object, keyCount: number }}
    */
   async shareHistoricalRoomKeys (roomId, userId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
 
     const exported = await this.exportRoomKeys(roomId)
@@ -334,7 +336,7 @@ class CryptoManager {
    * @returns {{ request: VerificationRequest, toDeviceRequest: Object }} the request object and outgoing to_device message
    */
   async requestVerification (userId, deviceId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const device = userDevices.get(new DeviceId(deviceId))
@@ -355,7 +357,7 @@ class CryptoManager {
    * @returns {VerificationRequest|undefined}
    */
   getVerificationRequest (userId, flowId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     return this.olmMachine.getVerificationRequest(new UserId(userId), flowId)
   }
 
@@ -366,7 +368,7 @@ class CryptoManager {
    * @returns {VerificationRequest[]}
    */
   getVerificationRequests (userId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     return this.olmMachine.getVerificationRequests(new UserId(userId))
   }
 
@@ -462,7 +464,7 @@ class CryptoManager {
    * @returns {boolean}
    */
   async isDeviceVerified (userId, deviceId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const device = userDevices.get(new DeviceId(deviceId))
     if (!device) return false
@@ -476,7 +478,7 @@ class CryptoManager {
    * @returns {Array<{deviceId: string, verified: boolean, locallyTrusted: boolean, crossSigningTrusted: boolean}>}
    */
   async getDeviceVerificationStatus (userId) {
-    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
+    if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const devices = userDevices.devices()
     return devices.map(d => ({
