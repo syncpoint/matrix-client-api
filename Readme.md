@@ -35,6 +35,7 @@ const client = MatrixClient({
   home_server_url: 'https://matrix.example.com',
   user_id: '@alice:example.com',
   password: 'secret',
+  db: commandQueueDB,                 // levelup-compatible DB for persistent command queue
   encryption: { enabled: true }       // optional: enable E2EE
 })
 
@@ -90,11 +91,42 @@ project.start(null, {
 
 **StructureAPI** — Creates and queries ODIN structural components: projects (Matrix spaces) and layers (Matrix rooms). Handles invitations, joins, power levels, and room hierarchy.
 
-**CommandAPI** — Send-only API with ordered queue. Schedules ODIN operations for delivery. Transparently encrypts messages when E2EE is enabled. Supports async callback functions in the queue for post-send actions.
+**CommandAPI** — Send-only API with persistent ordered queue. Schedules ODIN operations for delivery and persists them to LevelDB so they survive restarts. Transparently encrypts messages when E2EE is enabled. Supports async callback functions in the queue for post-send actions.
 
 **TimelineAPI** — Receive-only API. Consumes the Matrix sync stream and message history. Transparently decrypts incoming events. Provides both initial catch-up (via `/messages`) and live streaming (via `/sync` long-poll).
 
 **CryptoManager** — Wraps the `@matrix-org/matrix-sdk-crypto-wasm` OlmMachine. Handles key upload, device tracking, Olm/Megolm session management, and historical key sharing.
+
+## Persistent Command Queue
+
+The CommandAPI uses a LevelDB-backed FIFO queue to persist pending commands. Operations survive ODIN restarts and Electron reloads.
+
+### How It Works
+
+1. When `schedule()` is called, the command is written to LevelDB and enqueued in memory.
+2. The `run()` loop dequeues and sends commands via HTTP.
+3. After successful delivery, `acknowledge()` removes the entry from the database.
+4. If ODIN crashes before acknowledge, the entry remains in the database and is restored on next startup.
+5. Matrix `sendMessageEvent` with `txnId` is idempotent, so duplicate sends after crash recovery are safe.
+
+Callback functions (e.g. for historical key sharing) are held in-memory only and are not persisted, as they are covered by existing safety nets in the crypto layer.
+
+### Setup
+
+The queue requires a `levelup`-compatible database instance, injected via the `db` property:
+
+```javascript
+import subleveldown from 'subleveldown'
+
+const commandQueueDB = subleveldown(odinDB, 'command-queue', { valueEncoding: 'json' })
+
+const client = MatrixClient({
+  home_server_url: 'https://matrix.example.com',
+  user_id: '@alice:example.com',
+  password: 'secret',
+  db: commandQueueDB
+})
+```
 
 ## End-to-End Encryption
 
@@ -128,9 +160,10 @@ const client = MatrixClient({
   home_server_url: 'https://matrix.example.com',
   user_id: '@alice:example.com',
   password: 'secret',
+  db: commandQueueDB,                      // levelup-compatible DB for persistent command queue
   encryption: {
     enabled: true,
-    storeName: 'crypto-<projectUUID>',    // persistent IndexedDB store (Electron/browser)
+    storeName: 'crypto-<projectUUID>',     // persistent IndexedDB store (Electron/browser)
     passphrase: 'optional-store-passphrase'
   }
 })
