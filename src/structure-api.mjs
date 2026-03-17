@@ -167,7 +167,6 @@ class StructureAPI {
     const state = await this.httpAPI.sync(undefined, filter, 0)
     
     const layers = {}
-    const wellknown = {}
     let space = undefined
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       if (!allRoomIds.includes(roomId)) continue
@@ -183,11 +182,9 @@ class StructureAPI {
       if (roomId === globalId) // space!
       {
         space = room
-      } else if (room.type === ROOM_TYPE.WELLKNOWN.EXTENSION.fqn) {
-        wellknown[roomId] = room
       } else {
         layers[roomId] = room
-      }      
+      }
     }
 
     /*
@@ -215,8 +212,7 @@ class StructureAPI {
       topic: space.topic,
       encryption: space.encryption || null,
       candidates, // invitations
-      layers,
-      wellknown
+      layers
     }    
 
     return project
@@ -305,10 +301,6 @@ class StructureAPI {
 
   async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER, options = {}) {
     return this.__createRoom(localId, friendlyName, description, ROOM_TYPE.LAYER, defaultUserRole, options)
-  }
-
-  async createWellKnownRoom (roomType) {
-    return this.__createRoom(roomType.type, roomType.name ?? roomType.type, '', roomType, null, {})
   }
 
   /**

@@ -1,6 +1,5 @@
 import { roomStateReducer, wrap } from "./convenience.mjs"
 import { getLogger } from './logger.mjs'
-import { ROOM_TYPE } from "./shared.mjs"
 import * as power from './powerlevel.mjs'
 
 
@@ -47,9 +46,6 @@ ProjectList.prototype.share = async function (projectId, name, description, opti
   this.wellKnown.set(result.globalId, result.localId)
   this.wellKnown.set(result.localId, result.globalId)
 
-  const extensionRoom = await this.structureAPI.createWellKnownRoom(ROOM_TYPE.WELLKNOWN.EXTENSION)
-  await this.structureAPI.addLayerToProject(result.globalId, extensionRoom.globalId, true) // suggested!
-
   return {
     id: projectId,
     upstreamId: result.globalId,
@@ -83,16 +79,6 @@ ProjectList.prototype.join = async function (projectId) {
 
   const project = await this.structureAPI.project(upstreamId)
   getLogger().debug('Join candidates:', project.candidates.length)
-
-  const autoJoinTypes = Object.values(ROOM_TYPE.WELLKNOWN).map(wk => wk.fqn)
-  const wellkown = project.candidates
-    .filter(room => autoJoinTypes.includes(room.type))
-    .map(room => room.id)   
-
-  const joinWellknownResult = await Promise.all(
-    wellkown.map(globalId => this.structureAPI.join(globalId))
-  )
-  getLogger().debug('Joined wellknown rooms:', joinWellknownResult.length)
 
   return {
     id: projectId,

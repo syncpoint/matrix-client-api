@@ -382,10 +382,6 @@ const commands = {
         if (operations.length <= 5) printJSON(operations)
         rl.prompt()
       },
-      receivedExtension: async ({ id, message }) => {
-        print(`\n   🔌 Extension ${id}:`, JSON.stringify(message).slice(0, 200))
-        rl.prompt()
-      },
       renamed: async (renamed) => {
         const items = Array.isArray(renamed) ? renamed : [renamed]
         items.forEach(r => print(`\n   ✏️  Renamed: ${r.id} → "${r.name}"`))

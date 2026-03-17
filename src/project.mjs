@@ -3,10 +3,7 @@ import { Base64 } from 'js-base64'
 import { getLogger } from './logger.mjs'
 import { wrap } from './convenience.mjs'
 import * as power from './powerlevel.mjs'
-import { ROOM_TYPE } from './shared.mjs'
-
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
-const ODINv2_EXTENSION_MESSAGE_TYPE = 'io.syncpoint.odin.extension'
 const M_SPACE_CHILD = 'm.space.child'
 const M_ROOM_NAME = 'm.room.name'
 const M_ROOM_POWER_LEVELS = 'm.room.power_levels'
@@ -70,13 +67,9 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   Object.values(hierarchy.layers).forEach(layer => {
     this.idMapping.remember(layer.room_id, layer.id)
   })
-  Object.values(hierarchy.wellknown).forEach(wellknownRoom => {
-    this.idMapping.remember(wellknownRoom.room_id, wellknownRoom.id)
-  })
-
   // Register encrypted rooms with the CryptoManager
   if (this.cryptoManager) {
-    const allRooms = { ...hierarchy.layers, ...hierarchy.wellknown }
+    const allRooms = { ...hierarchy.layers }
     for (const [roomId, room] of Object.entries(allRooms)) {
       if (room.encryption) {
         await this.cryptoManager.setRoomEncryption(roomId, room.encryption)
@@ -105,11 +98,6 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
         default: layer.powerlevel.default.name
       },
       topic: layer.topic      
-    })),
-    wellknownRooms: Object.values(hierarchy.wellknown).map(wellknownRoom => ({
-      creator: wellknownRoom.creator,
-      id: wellknownRoom.id,
-      name: wellknownRoom.name      
     })),
     invitations: hierarchy.candidates.map(candidate => ({
       id: Base64.encode(candidate.id),
@@ -283,10 +271,6 @@ Project.prototype.post = async function (layerId, operations) {
   this.__post(layerId, operations, ODINv2_MESSAGE_TYPE)
 }
 
-Project.prototype.postToExtension = async function (operations) {
-  this.__post(ROOM_TYPE.WELLKNOWN.EXTENSION.type, operations, ODINv2_EXTENSION_MESSAGE_TYPE)
-}
-
 Project.prototype.__post = async function (layerId, operations, messageType) {
 
   const split = ops => {
@@ -327,8 +311,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       M_ROOM_POWER_LEVELS,
       M_SPACE_CHILD,
       M_ROOM_MEMBER,
-      ODINv2_MESSAGE_TYPE,
-      ODINv2_EXTENSION_MESSAGE_TYPE
+      ODINv2_MESSAGE_TYPE
     ]
 
     const filter = { 
@@ -358,7 +341,6 @@ Project.prototype.start = async function (streamToken, handler = {}) {
   const isMembershipChanged = events => events.some(event => event.type === M_ROOM_MEMBER)
 
   const isODINOperation = events => events.some(event => event.type === ODINv2_MESSAGE_TYPE)
-  const isODINExtensionMessage = events => events.some(event => event.type === ODINv2_EXTENSION_MESSAGE_TYPE)
 
 
   const streamHandler = wrap(handler)
@@ -457,18 +439,6 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         }
       }
 
-      if (isODINExtensionMessage(content)) {
-        const message = content
-          .filter(event => event.type === ODINv2_EXTENSION_MESSAGE_TYPE)
-          .map(event => JSON.parse(Base64.decode(event.content.content)))
-          .flat()        
-          
-        await streamHandler.receivedExtension({
-          id: this.idMapping.get(roomId),
-          message
-        })
-      }
-      
       if (isODINOperation(content)) {
         const operations = content
           .filter(event => event.type === ODINv2_MESSAGE_TYPE)
