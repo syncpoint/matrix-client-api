@@ -51,7 +51,7 @@ const roomStateReducer = (acc, event) => {
     case 'm.room.create': {
       acc.type = (event.content?.type) ? event.content.type : 'm.room'
       acc.id = event.content['io.syncpoint.odin.id']
-      acc.creator = event.sender
+      acc.sender = event.sender
       break 
     }
     case 'm.room.name': { acc.name = event.content.name; break }
