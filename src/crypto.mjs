@@ -53,11 +53,7 @@ class CryptoManager {
     const log = getLogger()
     await initAsync()
 
-    if (passphrase) {
-      this.storeHandle = await StoreHandle.open(storeName, passphrase)
-    } else {
-      this.storeHandle = await StoreHandle.open(storeName)
-    }
+    this.storeHandle = await StoreHandle.open(storeName, passphrase)
 
     this.olmMachine = await OlmMachine.initFromStore(
       new UserId(userId),
