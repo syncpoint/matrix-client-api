@@ -1,6 +1,6 @@
 # @syncpoint/matrix-client-api
 
-A purpose-built Matrix client library for ODIN collaborative C2IS. Provides high-level abstractions for project/layer management, real-time synchronization, and end-to-end encryption — designed for both Node.js and browser (Electron) environments.
+A purpose-built Matrix client library for [ODIN](https://odin.syncpoint.io) collaborative C2IS. Provides high-level abstractions for project/layer management, real-time synchronization, and end-to-end encryption — designed for both Node.js and browser (Electron) environments.
 
 > **Note:** This is not a general-purpose Matrix SDK. It creates domain-specific abstractions like `ProjectList` and `Project` tailored to ODIN's collaboration model.
 
