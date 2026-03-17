@@ -20,9 +20,14 @@ import { getLogger } from './logger.mjs'
 const NOT_INITIALIZED = 'CryptoManager not initialized'
 
 class CryptoManager {
-  constructor () {
+  /**
+   * @param {Object} [options]
+   * @param {TrustRequirement} [options.trustRequirement=TrustRequirement.Untrusted] - Trust level for decryption
+   */
+  constructor ({ trustRequirement = TrustRequirement.Untrusted } = {}) {
     this.olmMachine = null
     this.storeHandle = null
+    this.trustRequirement = trustRequirement
   }
 
   /**
@@ -166,7 +171,7 @@ class CryptoManager {
     if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
     try {
-      const decryptionSettings = new DecryptionSettings(TrustRequirement.Untrusted)
+      const decryptionSettings = new DecryptionSettings(this.trustRequirement)
       const decrypted = await this.olmMachine.decryptRoomEvent(
         JSON.stringify(event),
         new RoomId(roomId),
@@ -531,4 +536,4 @@ class CryptoManager {
   }
 }
 
-export { CryptoManager, RequestType, VerificationMethod, VerificationRequestPhase }
+export { CryptoManager, RequestType, TrustRequirement, VerificationMethod, VerificationRequestPhase }
