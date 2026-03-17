@@ -47,22 +47,17 @@ class FIFO {
     const log = getLogger()
     const entries = []
 
-    await new Promise((resolve, reject) => {
-      const stream = this.db.createReadStream({ gte: `${KEY_PREFIX}0`, lte: `${KEY_PREFIX}\xFF` })
-      stream.on('data', ({ key, value }) => {
-        const seq = parseKey(typeof key === 'string' ? key : key.toString())
-        const command = typeof value === 'string' ? JSON.parse(value) : value
-        entries.push({ seq, key: typeof key === 'string' ? key : key.toString(), command })
-      })
-      stream.on('error', reject)
-      stream.on('end', resolve)
-    })
+    const raw = await this.db.iterator({ gte: `${KEY_PREFIX}0`, lte: `${KEY_PREFIX}\xFF` }).all()
+    for (const [key, value] of raw) {
+      const seq = parseKey(key)
+      entries.push({ seq, key, command: value })
+    }
 
     // Restore the counter (persisted separately to survive acknowledge)
     try {
       const savedCounter = await this.db.get(COUNTER_KEY)
-      this.counter = typeof savedCounter === 'number' ? savedCounter : Number(savedCounter)
-    } catch (err) {
+      if (savedCounter != null) this.counter = Number(savedCounter)
+    } catch {
       // Key not found — counter stays at 0
     }
 
@@ -100,8 +95,8 @@ class FIFO {
       this.counter++
       key = formatKey(this.counter)
       await this.db.batch([
-        { type: 'put', key, value: JSON.stringify(command) },
-        { type: 'put', key: COUNTER_KEY, value: JSON.stringify(this.counter) }
+        { type: 'put', key, value: command },
+        { type: 'put', key: COUNTER_KEY, value: this.counter }
       ])
     }
 
