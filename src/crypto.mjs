@@ -70,7 +70,7 @@ class CryptoManager {
    * Returns array of request objects that the caller must execute via HTTP.
    */
   async outgoingRequests () {
-    if (!this.olmMachine) return []
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     return this.olmMachine.outgoingRequests()
   }
 
@@ -81,7 +81,7 @@ class CryptoManager {
    * @param {string} responseBody - JSON-encoded response body
    */
   async markRequestAsSent (requestId, requestType, responseBody) {
-    if (!this.olmMachine) return
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     await this.olmMachine.markRequestAsSent(requestId, requestType, responseBody)
   }
 
@@ -93,7 +93,7 @@ class CryptoManager {
    * @param {Array} unusedFallbackKeys - device_unused_fallback_key_types from sync response
    */
   async receiveSyncChanges (toDeviceEvents, changedDeviceLists, oneTimeKeyCounts, unusedFallbackKeys) {
-    if (!this.olmMachine) return
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const log = getLogger()
 
     const changed = (changedDeviceLists?.changed || []).map(id => new UserId(id))
@@ -204,7 +204,7 @@ class CryptoManager {
    * @returns {KeysClaimRequest|undefined}
    */
   async getMissingSessions (userIds) {
-    if (!this.olmMachine) return undefined
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const users = userIds.map(id => new UserId(id))
     return this.olmMachine.getMissingSessions(users)
   }
@@ -214,7 +214,7 @@ class CryptoManager {
    * @param {string[]} userIds
    */
   async updateTrackedUsers (userIds) {
-    if (!this.olmMachine) return
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     await this.olmMachine.updateTrackedUsers(userIds.map(id => new UserId(id)))
   }
 
@@ -225,7 +225,7 @@ class CryptoManager {
    * @returns {Object|undefined} KeysQueryRequest or undefined
    */
   async queryKeysForUsers (userIds) {
-    if (!this.olmMachine) return undefined
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     return this.olmMachine.queryKeysForUsers(userIds.map(id => new UserId(id)))
   }
 
@@ -236,7 +236,7 @@ class CryptoManager {
    * @param {Object} [encryptionContent] - Content of the m.room.encryption state event
    */
   async setRoomEncryption (roomId, encryptionContent = {}) {
-    if (!this.olmMachine) return
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const log = getLogger()
     const settings = new RoomSettings(EncryptionAlgorithm.MegolmV1AesSha2, false, false)
     await this.olmMachine.setRoomSettings(new RoomId(roomId), settings)
@@ -355,7 +355,7 @@ class CryptoManager {
    * @returns {VerificationRequest|undefined}
    */
   getVerificationRequest (userId, flowId) {
-    if (!this.olmMachine) return undefined
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     return this.olmMachine.getVerificationRequest(new UserId(userId), flowId)
   }
 
@@ -366,7 +366,7 @@ class CryptoManager {
    * @returns {VerificationRequest[]}
    */
   getVerificationRequests (userId) {
-    if (!this.olmMachine) return []
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     return this.olmMachine.getVerificationRequests(new UserId(userId))
   }
 
@@ -462,7 +462,7 @@ class CryptoManager {
    * @returns {boolean}
    */
   async isDeviceVerified (userId, deviceId) {
-    if (!this.olmMachine) return false
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const device = userDevices.get(new DeviceId(deviceId))
     if (!device) return false
@@ -476,7 +476,7 @@ class CryptoManager {
    * @returns {Array<{deviceId: string, verified: boolean, locallyTrusted: boolean, crossSigningTrusted: boolean}>}
    */
   async getDeviceVerificationStatus (userId) {
-    if (!this.olmMachine) return []
+    if (!this.olmMachine) throw new Error('CryptoManager not initialized')
     const userDevices = await this.olmMachine.getUserDevices(new UserId(userId))
     const devices = userDevices.devices()
     return devices.map(d => ({

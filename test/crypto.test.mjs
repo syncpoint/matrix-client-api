@@ -188,10 +188,12 @@ describe('Outgoing Requests', function () {
     // No error means success
   })
 
-  it('should return empty array when not initialized', async () => {
+  it('should throw when not initialized', async () => {
     const crypto = new CryptoManager()
-    const requests = await crypto.outgoingRequests()
-    assert.deepStrictEqual(requests, [])
+    await assert.rejects(
+      () => crypto.outgoingRequests(),
+      { message: 'CryptoManager not initialized' }
+    )
   })
 })
 
