@@ -1,11 +1,9 @@
 
 import { Base64 } from 'js-base64'
+import { getLogger } from './logger.mjs'
 import { wrap } from './convenience.mjs'
 import * as power from './powerlevel.mjs'
-import { ROOM_TYPE } from './shared.mjs'
-
 const ODINv2_MESSAGE_TYPE = 'io.syncpoint.odin.operation'
-const ODINv2_EXTENSION_MESSAGE_TYPE = 'io.syncpoint.odin.extension'
 const M_SPACE_CHILD = 'm.space.child'
 const M_ROOM_NAME = 'm.room.name'
 const M_ROOM_POWER_LEVELS = 'm.room.power_levels'
@@ -22,10 +20,11 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI }) {
+const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
+  this.cryptoManager = cryptoManager || null
 
   this.idMapping = new Map()
   this.idMapping.remember = function (upstream, downstream) {
@@ -68,9 +67,19 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   Object.values(hierarchy.layers).forEach(layer => {
     this.idMapping.remember(layer.room_id, layer.id)
   })
-  Object.values(hierarchy.wellknown).forEach(wellknownRoom => {
-    this.idMapping.remember(wellknownRoom.room_id, wellknownRoom.id)
-  })
+  // Register encrypted rooms with the CryptoManager
+  if (this.cryptoManager) {
+    const allRooms = { ...hierarchy.layers }
+    for (const [roomId, room] of Object.entries(allRooms)) {
+      if (room.encryption) {
+        await this.cryptoManager.setRoomEncryption(roomId, room.encryption)
+      }
+    }
+    // Also check the space itself
+    if (hierarchy.encryption) {
+      await this.cryptoManager.setRoomEncryption(upstreamId, hierarchy.encryption)
+    }
+  }
 
   const projectStructure = {
     id,
@@ -90,13 +99,8 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
       },
       topic: layer.topic      
     })),
-    wellknownRooms: Object.values(hierarchy.wellknown).map(wellknownRoom => ({
-      creator: wellknownRoom.creator,
-      id: wellknownRoom.id,
-      name: wellknownRoom.name      
-    })),
     invitations: hierarchy.candidates.map(candidate => ({
-      id: Base64.encode(candidate.id),
+      id: Base64.encodeURI(candidate.id),
       name: candidate.name,
       topic: candidate.topic
     }))
@@ -105,12 +109,12 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   return projectStructure
 }
 
-Project.prototype.shareLayer = async function (layerId, name, description) {
+Project.prototype.shareLayer = async function (layerId, name, description, options = {}) {
   if (this.idMapping.get(layerId)) {
     /* layer is already shared */
     return
   }
-  const layer = await this.structureAPI.createLayer(layerId, name, description)
+  const layer = await this.structureAPI.createLayer(layerId, name, description, undefined, options)
   
   await this.structureAPI.addLayerToProject(this.idMapping.get(this.projectId), layer.globalId)
   this.idMapping.remember(layerId, layer.globalId)
@@ -141,6 +145,81 @@ Project.prototype.joinLayer = async function (layerId) {
   return layer
 }
 
+/**
+ * Schedule sharing of all historical Megolm session keys for a layer
+ * with all project members. The sharing is enqueued in the command queue
+ * so it executes AFTER any pending content posts have been sent and
+ * encrypted (ensuring the session keys actually exist).
+ *
+ * to_device messages are queued server-side, so offline recipients
+ * get them on next sync.
+ *
+ * @param {string} layerId - the local layer id
+ */
+Project.prototype.shareHistoricalKeys = function (layerId) {
+  if (!this.cryptoManager) return
+  const roomId = this.idMapping.get(layerId)
+  if (!roomId) return
+  this.commandAPI.schedule([async () => {
+    await this._shareHistoricalKeysWithProjectMembers(roomId)
+  }])
+}
+
+/**
+ * @private
+ */
+Project.prototype._shareHistoricalKeysWithProjectMembers = async function (roomId, targetUserIds) {
+  if (!this.cryptoManager) return
+  const log = getLogger()
+  const myUserId = this.timelineAPI.credentials().user_id
+
+  try {
+    // If no specific targets, get all project members
+    let userIds = targetUserIds
+    if (!userIds) {
+      const projectRoomId = this.idMapping.get(this.projectId)
+      const members = await this.commandAPI.httpAPI.members(projectRoomId)
+      userIds = (members.chunk || [])
+        .filter(e => e.content?.membership === 'join')
+        .map(e => e.state_key)
+        .filter(id => id !== myUserId)
+    }
+
+    if (userIds.length === 0) return
+
+    for (const userId of userIds) {
+      try {
+        // Ensure we have the user's device keys
+        await this.cryptoManager.updateTrackedUsers([userId])
+        const keysQueryRequest = await this.cryptoManager.queryKeysForUsers([userId])
+        if (keysQueryRequest) {
+          const queryResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
+          await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
+        }
+
+        // Establish Olm sessions if needed
+        const claimRequest = await this.cryptoManager.getMissingSessions([userId])
+        if (claimRequest) {
+          const claimResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(claimRequest)
+          await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
+        }
+
+        // Export and share historical keys
+        const { toDeviceMessages, keyCount } = await this.cryptoManager.shareHistoricalRoomKeys(roomId, userId)
+        if (keyCount > 0) {
+          const txnId = `odin_keyshare_${Date.now()}_${Math.random().toString(36).slice(2)}`
+          await this.commandAPI.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
+          log.info(`Shared ${keyCount} historical keys with ${userId} for room ${roomId}`)
+        }
+      } catch (err) {
+        log.warn(`Failed to share historical keys with ${userId}: ${err.message}`)
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to share historical keys for room ${roomId}: ${err.message}`)
+  }
+}
+
 Project.prototype.leaveLayer = async function (layerId) {
   const upstreamId = this.idMapping.get(layerId)
   const layer = await this.structureAPI.getLayer(upstreamId)
@@ -151,7 +230,7 @@ Project.prototype.leaveLayer = async function (layerId) {
 
   /* an invitation to re-join the layer */
   return {
-    id: Base64.encode(upstreamId),
+    id: Base64.encodeURI(upstreamId),
     name: layer.name,
     topic: layer.topic
   }
@@ -174,8 +253,9 @@ Project.prototype.content = async function (layerId) {
   const filter = { 
       lazy_load_members: true, // improve performance
       limit: 1000, 
-      types: [ODINv2_MESSAGE_TYPE],
-      not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
+      types: [ODINv2_MESSAGE_TYPE]
+      // No not_senders filter: on (re-)join we need ALL events
+      // including our own to reconstruct the full layer state.
     }
 
   const upstreamId = this.idMapping.get(layerId)
@@ -190,10 +270,6 @@ Project.prototype.content = async function (layerId) {
 
 Project.prototype.post = async function (layerId, operations) {
   this.__post(layerId, operations, ODINv2_MESSAGE_TYPE)
-}
-
-Project.prototype.postToExtension = async function (operations) {
-  this.__post(ROOM_TYPE.WELLKNOWN.EXTENSION.type, operations, ODINv2_EXTENSION_MESSAGE_TYPE)
 }
 
 Project.prototype.__post = async function (layerId, operations, messageType) {
@@ -212,7 +288,7 @@ Project.prototype.__post = async function (layerId, operations, messageType) {
     return [...collect(splittedOperations[0]), ...collect(splittedOperations[1])]
   }
 
-  const encode = operations => Base64.encode(JSON.stringify(operations))
+  const encode = operations => Base64.encodeURI(JSON.stringify(operations))
 
   const chunks = split(operations)
   const parts = collect(chunks)
@@ -236,8 +312,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       M_ROOM_POWER_LEVELS,
       M_SPACE_CHILD,
       M_ROOM_MEMBER,
-      ODINv2_MESSAGE_TYPE,
-      ODINv2_EXTENSION_MESSAGE_TYPE
+      ODINv2_MESSAGE_TYPE
     ]
 
     const filter = { 
@@ -267,7 +342,6 @@ Project.prototype.start = async function (streamToken, handler = {}) {
   const isMembershipChanged = events => events.some(event => event.type === M_ROOM_MEMBER)
 
   const isODINOperation = events => events.some(event => event.type === ODINv2_MESSAGE_TYPE)
-  const isODINExtensionMessage = events => events.some(event => event.type === ODINv2_EXTENSION_MESSAGE_TYPE)
 
 
   const streamHandler = wrap(handler)
@@ -299,12 +373,12 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         const project = await this.structureAPI.project(roomId)
         const childRoom = project.candidates.find(room => room.id === childEvent.state_key)
         if (!childRoom) {
-          console.warn('Received m.space.child event but did not find new child room')
+          getLogger().warn('Received m.space.child but child room not found')
           return
         }
         
         await streamHandler.invited({
-          id: Base64.encode(childRoom.id),
+          id: Base64.encodeURI(childRoom.id),
           name: childRoom.name,
           topic: childRoom.topic
         })
@@ -348,20 +422,24 @@ Project.prototype.start = async function (streamToken, handler = {}) {
             subject: event.state_key
           }))
         await streamHandler.membershipChanged(membership)
+
+        // Safety net: share historical keys with newly joined members.
+        // Primary key sharing happens at share/invite time (see shareLayer),
+        // but this catches keys created between share and join.
+        if (this.cryptoManager) {
+          const myUserId = this.timelineAPI.credentials().user_id
+          const newJoinUserIds = content
+            .filter(event => event.type === M_ROOM_MEMBER)
+            .filter(event => event.content.membership === 'join')
+            .filter(event => event.state_key !== myUserId)
+            .map(event => event.state_key)
+
+          if (newJoinUserIds.length > 0) {
+            await this._shareHistoricalKeysWithProjectMembers(roomId, newJoinUserIds)
+          }
+        }
       }
 
-      if (isODINExtensionMessage(content)) {
-        const message = content
-          .filter(event => event.type === ODINv2_EXTENSION_MESSAGE_TYPE)
-          .map(event => JSON.parse(Base64.decode(event.content.content)))
-          .flat()        
-          
-        await streamHandler.receivedExtension({
-          id: this.idMapping.get(roomId),
-          message
-        })
-      }
-      
       if (isODINOperation(content)) {
         const operations = content
           .filter(event => event.type === ODINv2_MESSAGE_TYPE)

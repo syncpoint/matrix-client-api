@@ -2,6 +2,8 @@
 import ky, { HTTPError } from 'ky'
 import { randomUUID } from 'crypto'
 import { effectiveFilter, roomStateReducer } from './convenience.mjs'
+import { getLogger } from './logger.mjs'
+import { RequestType } from './crypto.mjs'
 
 const POLL_TIMEOUT = 30000
 const RETRY_LIMIT = 2
@@ -20,6 +22,7 @@ function HttpAPI (credentials) {
     user_id: credentials.user_id,
     home_server: credentials.home_server,
     home_server_url: credentials.home_server_url,
+    device_id: credentials.device_id,
     refresh_token: credentials.refresh_token,
     access_token: credentials.access_token
   }
@@ -51,17 +54,22 @@ function HttpAPI (credentials) {
               throw error
             } else if (error.response.status === 401) {
               const body = await error.response.json()
-              if (body.errcode !== 'M_UNKNOWN_TOKEN' || !body.soft_logout) {
-                console.error('MATRIX server does not like us anymore :-(', body.error)
-                throw new Error(`${body.errcode}: ${body.error}`)
+              if (body.errcode === 'M_UNKNOWN_TOKEN' && this.credentials.refresh_token) {
+                getLogger().info('Access token expired, attempting refresh...')
+                try {
+                  const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
+                  this.credentials.refresh_token = tokens.refresh_token
+                  /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
+                  this.credentials.access_token = tokens.access_token
+                  if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(this.credentials)
+                  return
+                } catch (refreshError) {
+                  getLogger().error('Token refresh failed:', refreshError.message)
+                  throw new Error(`Token refresh failed: ${refreshError.message}`)
+                }
               }
-              
-              const tokens = await this.refreshAccessToken(this.credentials.refresh_token)            
-              this.credentials.refresh_token = tokens.refresh_token
-              /* beforeRequest hook will pick up the access_token and set the Authorization header accordingly */
-              this.credentials.access_token = tokens.access_token
-              if (this.handler?.tokenRefreshed && typeof this.handler?.tokenRefreshed === 'function') this.handler.tokenRefreshed(this.credentials) // notify the outside world about the new tokens
-              return
+              getLogger().error('Authentication rejected:', body.errcode, body.error)
+              throw new Error(`${body.errcode}: ${body.error}`)
             }
           }
 
@@ -129,7 +137,7 @@ HttpAPI.login = async function (homeServerUrl, options) {
             type: response.type,
             url: response.url
           })
-          console.log(`Retrying at ${(new Date(Date.now() + retryAfter)).toISOString()}`)
+          getLogger().info(`Rate limited, retrying at ${(new Date(Date.now() + retryAfter)).toISOString()}`)
           return retryAfterResponse          
 
         }
@@ -281,7 +289,7 @@ HttpAPI.prototype.joinedRooms = async function () {
 }
 
 HttpAPI.prototype.members = async function (roomId, exclude = 'leave') {
-  return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/members?not_memebership=${exclude}`).json()
+  return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/members?not_membership=${exclude}`).json()
 }
 
 HttpAPI.prototype.searchInUserDirectory = async function (term) {
@@ -354,16 +362,8 @@ HttpAPI.prototype.getMessages = async function (roomId, options) {
   return this.client.get(`v3/rooms/${roomId}/messages`, { searchParams }).json()
 }
 
-HttpAPI.prototype.sendToDevice = async function (deviceId, eventType, content = {}, txnId = randomUUID()) {
-  const toDeviceMessage = {}
-  toDeviceMessage[deviceId] = content
-
-  const body = {
-    messages: {}
-  }
-
-  body.messages[this.credentials.user_id] = toDeviceMessage
-
+HttpAPI.prototype.sendToDevice = async function (eventType, txnId = randomUUID(), messages = {}) {
+  const body = { messages }
   return this.client.put(`v3/sendToDevice/${encodeURIComponent(eventType)}/${encodeURIComponent(txnId)}`, {
     json: body
   }).json()
@@ -382,6 +382,83 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT) 
   return this.client.get('v3/sync', {
     searchParams: buildSearchParams(since, filter, timeout)
   }).json()
+}
+
+/**
+ * Execute an outgoing crypto request against the appropriate Matrix endpoint.
+ * @param {Object} request - An outgoing request from OlmMachine (KeysUpload, KeysQuery, KeysClaim, ToDevice, SignatureUpload, RoomMessage)
+ * @returns {string} JSON-encoded response body
+ */
+HttpAPI.prototype.sendOutgoingCryptoRequest = async function (request) {
+  const log = getLogger()
+  const body = request.body
+
+  switch (request.type) {
+    case RequestType.KeysUpload: {
+      log.debug('Sending keys/upload request')
+      const response = await this.client.post('v3/keys/upload', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.KeysQuery: {
+      log.debug('Sending keys/query request')
+      const response = await this.client.post('v3/keys/query', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.KeysClaim: {
+      log.debug('Sending keys/claim request')
+      const response = await this.client.post('v3/keys/claim', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.ToDevice: {
+      const eventType = request.event_type
+      const txnId = request.txn_id
+      log.debug('Sending to-device request:', eventType)
+      const response = await this.client.put(
+        `v3/sendToDevice/${encodeURIComponent(eventType)}/${encodeURIComponent(txnId)}`,
+        { body, headers: { 'Content-Type': 'application/json' } }
+      ).text()
+      return response
+    }
+
+    case RequestType.SignatureUpload: {
+      log.debug('Sending signature upload request')
+      const response = await this.client.post('v3/keys/signatures/upload', { body, headers: { 'Content-Type': 'application/json' } }).text()
+      return response
+    }
+
+    case RequestType.RoomMessage: {
+      const roomId = request.room_id
+      const eventType = request.event_type
+      const txnId = request.txn_id
+      log.debug('Sending room message request:', eventType, 'to', roomId)
+      const content = JSON.parse(body)
+      const result = await this.sendMessageEvent(roomId, eventType, content, txnId)
+      return JSON.stringify(result)
+    }
+
+    default:
+      log.warn('Unknown outgoing request type:', request.type)
+      return '{}'
+  }
+}
+
+/**
+ * Process all outgoing requests from the CryptoManager.
+ * @param {import('./crypto.mjs').CryptoManager} cryptoManager
+ */
+HttpAPI.prototype.processOutgoingCryptoRequests = async function (cryptoManager) {
+  const requests = await cryptoManager.outgoingRequests()
+  for (const request of requests) {
+    try {
+      const response = await this.sendOutgoingCryptoRequest(request)
+      await cryptoManager.markRequestAsSent(request.id, request.type, response)
+    } catch (error) {
+      getLogger().error('Failed to process outgoing crypto request:', error.message)
+    }
+  }
 }
 
 export {

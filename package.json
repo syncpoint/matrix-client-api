@@ -4,7 +4,8 @@
   "description": "A minimal client API for [matrix]",
   "main": "index.mjs",
   "scripts": {
-    "test": "mocha ./test/*"
+    "test": "mocha ./test/*",
+    "test:e2e": "mocha --timeout 30000 ./test-e2e/*.test.mjs"
   },
   "keywords": [
     "Matrix",
@@ -14,6 +15,7 @@
   "author": "thomas.halwax@syncpoint.io",
   "license": "MIT",
   "dependencies": {
+    "@matrix-org/matrix-sdk-crypto-wasm": "^17.1.0",
     "js-base64": "^3.7.7",
     "ky": "^1.7.2"
   },

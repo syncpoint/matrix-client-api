@@ -13,7 +13,20 @@ import { ROOM_TYPE } from './shared.mjs'
  * @description Designed for usage in ODINv2.
  * @typedef {Object} StructureAPI
  */
+const ENCRYPTION_STATE_EVENT = {
+  type: 'm.room.encryption',
+  content: {
+    algorithm: 'm.megolm.v1.aes-sha2',
+    rotation_period_ms: 604800000,
+    rotation_period_msgs: 100
+  },
+  state_key: ''
+}
+
 class StructureAPI {
+  /**
+   * @param {import('./http-api.mjs').HttpAPI} httpAPI
+   */
   constructor (httpAPI) {
     this.httpAPI = httpAPI
   }
@@ -63,7 +76,9 @@ class StructureAPI {
     const projects = {}
 
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
-      const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
+      const stateEvents = content.state?.events || []
+      const timelineStateEvents = (content.timeline?.events || []).filter(e => 'state_key' in e)
+      const room = [...stateEvents, ...timelineStateEvents].reduce(roomStateReducer, { room_id: roomId })
       if (room.type === 'm.space' && room.id) {
         projects[roomId] = room
       }
@@ -152,11 +167,12 @@ class StructureAPI {
     const state = await this.httpAPI.sync(undefined, filter, 0)
     
     const layers = {}
-    const wellknown = {}
     let space = undefined
     for (const [roomId, content] of Object.entries(state.rooms?.join || {})) {
       if (!allRoomIds.includes(roomId)) continue
-      const room = content.state.events.reduce(roomStateReducer, { room_id: roomId })
+      const stateEvents = content.state?.events || []
+      const timelineStateEvents = (content.timeline?.events || []).filter(e => 'state_key' in e)
+      const room = [...stateEvents, ...timelineStateEvents].reduce(roomStateReducer, { room_id: roomId })
       const scope = (roomId === globalId) 
                     ? power.SCOPE.PROJECT
                     : power.SCOPE.LAYER
@@ -166,11 +182,9 @@ class StructureAPI {
       if (roomId === globalId) // space!
       {
         space = room
-      } else if (room.type === ROOM_TYPE.WELLKNOWN.EXTENSION.fqn) {
-        wellknown[roomId] = room
       } else {
         layers[roomId] = room
-      }      
+      }
     }
 
     /*
@@ -196,9 +210,9 @@ class StructureAPI {
       powerlevel: space.powerlevel,
       room_id: space.room_id,
       topic: space.topic,
+      encryption: space.encryption || null,
       candidates, // invitations
-      layers,
-      wellknown
+      layers
     }    
 
     return project
@@ -211,7 +225,7 @@ class StructureAPI {
    * @param {string} friendlyName - This name will be shown in the "project" view for every node that gets invited to join the project.
    * @returns 
    */
-  async createProject (localId, friendlyName, description, defaultUserRole = power.ROLES.PROJECT.CONTRIBUTOR) {
+  async createProject (localId, friendlyName, description, defaultUserRole = power.ROLES.PROJECT.CONTRIBUTOR, options = {}) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
@@ -252,7 +266,8 @@ class StructureAPI {
           'm.room.encryption': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
           'm.space.child': power.ROLES.PROJECT.CONTRIBUTOR.powerlevel,
           'm.room.topic': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
-          'm.reaction': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel
+          'm.reaction': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
+          'm.room.encrypted': power.ROLES.PROJECT.CONTRIBUTOR.powerlevel
         },
         'events_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
         'state_default': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
@@ -262,6 +277,10 @@ class StructureAPI {
         'invite': power.ROLES.PROJECT.ADMINISTRATOR.powerlevel,
         'historical': power.ROLES.PROJECT.READER.powerlevel
       }
+    }
+
+    if (options.encrypted) {
+      creationOptions.initial_state.push(ENCRYPTION_STATE_EVENT)
     }
 
     creationOptions.power_level_content_override.users[this.httpAPI.credentials.user_id] = power.ROLES.PROJECT.OWNER.powerlevel
@@ -280,12 +299,8 @@ class StructureAPI {
     }
   }
 
-  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER) {
-    return this.__createRoom(localId, friendlyName, description, ROOM_TYPE.LAYER, defaultUserRole)
-  }
-
-  async createWellKnownRoom (roomType) {
-    return this.__createRoom(roomType.type, roomType.name ?? roomType.type, '', roomType, null)
+  async createLayer (localId, friendlyName, description, defaultUserRole = power.ROLES.LAYER.READER, options = {}) {
+    return this.__createRoom(localId, friendlyName, description, ROOM_TYPE.LAYER, defaultUserRole, options)
   }
 
   /**
@@ -295,7 +310,7 @@ class StructureAPI {
    * @param {string} friendlyName - This name will be shown in the "layer" scope.
    * @returns 
    */
-  async __createRoom (localId, friendlyName, description, roomType, defaultUserRole) {
+  async __createRoom (localId, friendlyName, description, roomType, defaultUserRole, options = {}) {
     const creationOptions = {
       name: friendlyName,
       topic: description,
@@ -337,7 +352,8 @@ class StructureAPI {
           'm.room.server_acl': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.room.encryption': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
           'm.space.parent': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
-          'io.syncpoint.odin.operation': power.ROLES.LAYER.CONTRIBUTOR.powerlevel
+          'io.syncpoint.odin.operation': power.ROLES.LAYER.CONTRIBUTOR.powerlevel,
+          'm.room.encrypted': power.ROLES.LAYER.CONTRIBUTOR.powerlevel
         },
         'events_default': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
         'state_default': power.ROLES.LAYER.ADMINISTRATOR.powerlevel,
@@ -352,6 +368,10 @@ class StructureAPI {
     }
 
     
+
+    if (options.encrypted) {
+      creationOptions.initial_state.push(ENCRYPTION_STATE_EVENT)
+    }
 
     const { room_id: globalId } = await this.httpAPI.createRoom(creationOptions)
 

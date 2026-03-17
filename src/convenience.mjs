@@ -1,4 +1,5 @@
 import { powerlevel } from "./powerlevel.mjs"
+import { getLogger } from './logger.mjs'
 
 const effectiveFilter = filter => {
   if (!filter) return
@@ -59,6 +60,7 @@ const roomStateReducer = (acc, event) => {
     case 'm.room.member': { if (acc.members) { acc.members.push(event.state_key) } else { acc['members'] = [event.state_key] }; break }
     case 'm.space.child': { if (acc.children) { acc.children.push(event.state_key) } else { acc['children'] = [event.state_key] }; break }
     case 'm.room.power_levels': { acc.power_levels = event.content; break }
+    case 'm.room.encryption': { acc.encryption = event.content; break }
   }
   return acc
 }
@@ -66,7 +68,7 @@ const roomStateReducer = (acc, event) => {
 const wrap = handler => {
   const proxyHandler = {
     get (target, property) {
-      return (property in target && typeof target[property] === 'function') ? target[property] : () => console.error(`HANDLER does not handle ${property}`)
+      return (property in target && typeof target[property] === 'function') ? target[property] : () => getLogger().warn('Unhandled stream event:', property)
     }
   }
   return new Proxy(handler, proxyHandler)
