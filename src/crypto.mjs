@@ -238,10 +238,7 @@ class CryptoManager {
   async setRoomEncryption (roomId, encryptionContent = {}) {
     if (!this.olmMachine) return
     const log = getLogger()
-    const algorithm = encryptionContent.algorithm === 'm.megolm.v1.aes-sha2'
-      ? EncryptionAlgorithm.MegolmV1AesSha2
-      : EncryptionAlgorithm.MegolmV1AesSha2 // default to Megolm
-    const settings = new RoomSettings(algorithm, false, false)
+    const settings = new RoomSettings(EncryptionAlgorithm.MegolmV1AesSha2, false, false)
     await this.olmMachine.setRoomSettings(new RoomId(roomId), settings)
     log.debug('Room encryption registered:', roomId)
   }
