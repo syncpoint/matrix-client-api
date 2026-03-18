@@ -77,7 +77,17 @@ Project.prototype.joinLayer = async function (layerId) {
 
 ### Modified `start()` — internal sync handler
 
-Inside the `for await` loop in `start()`, before processing external handlers, check for pending rooms:
+Inside the `for await` loop in `start()`, before processing external handlers, check for pending rooms.
+
+**Important:** The sync response for a newly joined room typically contains 0..n events in `timeline.events` plus a `prev_batch` token. These sync events represent only the most recent slice of the room history. To reconstruct the full layer state, we need **all** events — both the historical ones (before the sync) and the ones delivered in the sync itself.
+
+The approach mirrors what `syncTimeline()` already does for `limited` timelines:
+
+1. Use `prev_batch` from the sync to paginate backwards via `catchUp()` — this yields all events **before** the sync timeline
+2. Take the events from the sync timeline itself
+3. Combine them in chronological order (oldest first)
+
+This avoids calling `content()` (which fetches forward from the beginning) and prevents duplicate events.
 
 ```javascript
 for await (const chunk of this.stream) {
@@ -85,10 +95,10 @@ for await (const chunk of this.stream) {
 
   // --- NEW: Sync-gated content fetch for recently joined rooms ---
   for (const roomId of this.pendingContent) {
-    const joinData = chunk.events[roomId] || null
-    if (!joinData) continue  // Room not yet in sync — keep waiting
+    const syncEvents = chunk.events[roomId] || null
+    if (!syncEvents) continue  // Room not yet in sync — keep waiting
 
-    // Room appeared in sync. Fetch full content.
+    // Room appeared in sync. Fetch historical content + combine with sync events.
     this.pendingContent.delete(roomId)
 
     const filter = {
@@ -98,8 +108,29 @@ for await (const chunk of this.stream) {
       // No not_senders: we need ALL events to reconstruct full layer state
     }
 
-    const content = await this.timelineAPI.content(roomId, filter)
-    const operations = content.events
+    // The sync chunk for this room has a prev_batch token (available in
+    // the raw sync response). Use it to paginate backwards for all events
+    // that came before the sync timeline.
+    // Note: syncTimeline() already does catchUp for limited timelines and
+    // prepends the result. For pending rooms, the events in chunk.events[roomId]
+    // are the sync timeline events. Historical events before prev_batch need
+    // to be fetched separately.
+
+    const prevBatch = chunk.prevBatch?.[roomId] || null
+    let allEvents = []
+
+    if (prevBatch) {
+      // Paginate backwards from prev_batch to get all historical events
+      const historical = await this.timelineAPI.catchUp(roomId, null, prevBatch, 'b', filter)
+      allEvents = [...historical.events, ...syncEvents]
+    } else {
+      // No prev_batch — sync events are all there is (e.g. brand-new room)
+      allEvents = syncEvents
+    }
+
+    // Filter for ODIN operations and decode
+    const operations = allEvents
+      .filter(event => event.type === ODINv2_MESSAGE_TYPE)
       .map(event => JSON.parse(Base64.decode(event.content.content)))
       .flat()
 
@@ -115,6 +146,17 @@ for await (const chunk of this.stream) {
   // ...
 }
 ```
+
+### `prev_batch` availability
+
+The raw sync response contains `prev_batch` per room at `rooms.join[roomId].timeline.prev_batch`. Currently, `syncTimeline()` processes limited timelines internally via `catchUp()` but does not expose `prev_batch` per room to the caller.
+
+To make `prev_batch` available in `start()`, `syncTimeline()` must include it in its return value. Options:
+
+1. **Return `prevBatch` map** alongside `events`: `{ next_batch, events, stateEvents, prevBatch: { roomId: token } }`
+2. **Only for pending rooms**: Since `syncTimeline()` already handles limited-timeline catch-up, the `prev_batch` is only needed for rooms in `pendingContent` where the standard catch-up may not apply (the room is new to the sync, not a gap in an existing timeline)
+
+Option 1 is simpler and more general. The `prevBatch` map would contain entries for every room that has a `prev_batch` in the sync response.
 
 ### `content()` remains unchanged
 
@@ -142,7 +184,12 @@ When a room first appears in a sync response after join, it may contain:
 - `timeline.limited` — indicates whether the timeline has been truncated
 - `state.events` — current room state
 
-The existing `syncTimeline()` in `TimelineAPI` already handles `limited` timelines via `catchUp()`. The `content()` call in the pending handler gets the full history regardless.
+For the pending content mechanism, the key fields are:
+
+- **`timeline.events`**: The 0..n most recent events. These are part of the complete history and must be included.
+- **`timeline.prev_batch`**: The starting point for backwards pagination. All events before this token must be fetched via `/messages` (i.e., `catchUp()`).
+
+The combination of `catchUp(prev_batch, backwards)` + sync timeline events yields the complete room history.
 
 ## E2EE Interaction
 
@@ -177,11 +224,14 @@ Same flow as a fresh join. `joinLayer()` adds to `pendingContent`, sync triggers
 
 1. After `joinLayer()`, no direct call to `content()` or `/messages` is made
 2. Content is fetched only after the room appears in a sync response
-3. Content includes all events (including own) for full state reconstruction
-4. Content is delivered to ODIN via the existing `streamHandler.received()` callback
-5. The existing `content()` method continues to work unchanged for hydrate and other callers
-6. No hardcoded delays or retry loops for the join → content flow
-7. Works with and without E2EE enabled
+3. Historical content (via `prev_batch` backwards pagination) is combined with sync timeline events in chronological order (oldest first)
+4. No duplicate events — historical fetch and sync events do not overlap
+5. Content includes all events (including own) for full state reconstruction
+6. Content is delivered to ODIN via the existing `streamHandler.received()` callback
+7. `syncTimeline()` exposes `prev_batch` per room in its return value
+8. The existing `content()` method continues to work unchanged for hydrate and other callers
+9. No hardcoded delays or retry loops for the join → content flow
+10. Works with and without E2EE enabled
 
 ## Test Plan
 
