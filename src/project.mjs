@@ -34,6 +34,10 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager
   this.idMapping.forget = function (key) {
     this.delete(key)
   }
+
+  // Rooms waiting for their first sync cycle before content is fetched.
+  // joinLayer() adds entries, start() processes them when the room appears in sync.
+  this.pendingContent = new Set()
 }
 
 /**
@@ -136,6 +140,16 @@ Project.prototype.joinLayer = async function (layerId) {
   await this.structureAPI.join(upstreamId)
   const room = await this.structureAPI.getLayer(upstreamId)  
   this.idMapping.remember(room.id, room.room_id)
+
+  // Register encryption if applicable (needed before content can be decrypted)
+  if (this.cryptoManager && room.encryption) {
+    await this.cryptoManager.setRoomEncryption(room.room_id, room.encryption)
+  }
+
+  // Mark for sync-gated content fetch: content will be loaded once the room
+  // appears in a sync response, not immediately after join.
+  this.pendingContent.add(room.room_id)
+
   const layer = {...room}
   layer.role = {
     self: room.powerlevel.self.name,
@@ -359,6 +373,54 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       will get skipped during the next streamToken updated.
     */
     await streamHandler.streamToken(chunk.next_batch)
+
+    // Sync-gated content fetch: for rooms that were recently joined,
+    // wait until they appear in the sync response, then fetch their
+    // full history and deliver via the received() handler.
+    for (const roomId of this.pendingContent) {
+      if (!chunk.events[roomId] && !chunk.prevBatch?.[roomId]) continue
+
+      // Room appeared in sync. Fetch full content.
+      this.pendingContent.delete(roomId)
+      const log = getLogger()
+      log.info(`Sync-gated content fetch for room ${roomId}`)
+
+      const contentFilter = {
+        lazy_load_members: true,
+        limit: 1000,
+        types: [ODINv2_MESSAGE_TYPE]
+        // No not_senders: we need ALL events to reconstruct full layer state
+      }
+
+      // Combine historical events (before sync) with sync timeline events.
+      // catchUp paginates backwards from prev_batch; sync events are the newest slice.
+      let allEvents = []
+      const prevBatchToken = chunk.prevBatch?.[roomId] || null
+
+      if (prevBatchToken) {
+        const historical = await this.timelineAPI.catchUp(roomId, null, prevBatchToken, 'b', contentFilter)
+        // historical.events are newest-first (backwards pagination), reverse for chronological order
+        const syncEvents = (chunk.events[roomId] || [])
+          .filter(event => event.type === ODINv2_MESSAGE_TYPE)
+        allEvents = [...historical.events.reverse(), ...syncEvents]
+      } else {
+        allEvents = (chunk.events[roomId] || [])
+          .filter(event => event.type === ODINv2_MESSAGE_TYPE)
+      }
+
+      const operations = allEvents
+        .map(event => JSON.parse(Base64.decode(event.content.content)))
+        .flat()
+
+      log.info(`Sync-gated content: ${operations.length} operations for room ${roomId}`)
+
+      if (operations.length > 0) {
+        await streamHandler.received({
+          id: this.idMapping.get(roomId),
+          operations
+        })
+      }
+    }
 
     if (Object.keys(chunk.events).length === 0) continue
 
