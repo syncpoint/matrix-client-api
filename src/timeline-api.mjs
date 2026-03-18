@@ -140,7 +140,6 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   }
 
   const stateEvents = {}
-  const prevBatch = {}
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
     // Collect state events (membership changes, power levels, etc.)
@@ -151,11 +150,6 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     const timelineState = (content.timeline?.events || []).filter(e => 'state_key' in e)
     if (timelineState.length) {
       stateEvents[roomId] = [...(stateEvents[roomId] || []), ...timelineState]
-    }
-
-    // Expose prev_batch per room for sync-gated content fetch
-    if (content.timeline?.prev_batch) {
-      prevBatch[roomId] = content.timeline.prev_batch
     }
 
     if (!content.timeline?.events?.length) continue
@@ -219,8 +213,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     since,
     next_batch: syncResult.next_batch,
     events,
-    stateEvents,
-    prevBatch
+    stateEvents
   }
 }
 
