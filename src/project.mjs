@@ -34,6 +34,10 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager
   this.idMapping.forget = function (key) {
     this.delete(key)
   }
+
+  // Rooms waiting for their first sync cycle before content is fetched.
+  // joinLayer() adds entries, start() processes them when the room appears in sync.
+  this.pendingContent = new Set()
 }
 
 /**
@@ -136,6 +140,16 @@ Project.prototype.joinLayer = async function (layerId) {
   await this.structureAPI.join(upstreamId)
   const room = await this.structureAPI.getLayer(upstreamId)  
   this.idMapping.remember(room.id, room.room_id)
+
+  // Register encryption if applicable (needed before content can be decrypted)
+  if (this.cryptoManager && room.encryption) {
+    await this.cryptoManager.setRoomEncryption(room.room_id, room.encryption)
+  }
+
+  // Mark for sync-gated content fetch: content will be loaded once the room
+  // appears in a sync response, not immediately after join.
+  this.pendingContent.add(room.room_id)
+
   const layer = {...room}
   layer.role = {
     self: room.powerlevel.self.name,
@@ -359,6 +373,26 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       will get skipped during the next streamToken updated.
     */
     await streamHandler.streamToken(chunk.next_batch)
+
+    // Sync-gated content fetch: for rooms that were recently joined,
+    // wait until they appear in the sync response, then fetch full content.
+    // The sync appearance is the server's signal that /messages will work reliably.
+    for (const roomId of this.pendingContent) {
+      if (!chunk.events[roomId]) continue
+
+      this.pendingContent.delete(roomId)
+      const log = getLogger()
+      log.info(`Sync-gated content fetch for room ${roomId}`)
+
+      const layerId = this.idMapping.get(roomId)
+      const operations = await this.content(layerId)
+
+      log.info(`Sync-gated content: ${operations.length} operations for room ${roomId}`)
+
+      if (operations.length > 0) {
+        await streamHandler.received({ id: layerId, operations })
+      }
+    }
 
     if (Object.keys(chunk.events).length === 0) continue
 
