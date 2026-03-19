@@ -86,7 +86,7 @@ async function buildStack (credentials) {
 
   const structureAPI = new StructureAPI(httpAPI)
   const db = createDB()
-  const commandAPI = new CommandAPI(httpAPI, null, db)
+  const commandAPI = new CommandAPI(httpAPI, { db })
   const timelineAPI = new TimelineAPI(httpAPI)
 
   return {

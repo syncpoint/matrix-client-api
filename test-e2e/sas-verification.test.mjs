@@ -31,6 +31,14 @@ setLogger({
   error: (...args) => console.error('[ERROR]', ...args)
 })
 
+async function processOutgoingRequests (httpAPI, crypto) {
+  const requests = await crypto.outgoingRequests()
+  for (const request of requests) {
+    const response = await httpAPI.sendOutgoingCryptoRequest(request)
+    await crypto.markRequestAsSent(request.id, request.type, response)
+  }
+}
+
 async function registerUser (username, deviceId) {
   const res = await fetch(`${HOMESERVER_URL}/_matrix/client/v3/register`, {
     method: 'POST',
@@ -62,7 +70,7 @@ async function syncAndProcess (httpAPI, crypto, since) {
     syncResult.device_one_time_keys_count || {},
     syncResult.device_unused_fallback_key_types || []
   )
-  await httpAPI.processOutgoingCryptoRequests(crypto)
+  await processOutgoingRequests(httpAPI, crypto)
   return syncResult.next_batch
 }
 
@@ -98,11 +106,11 @@ describe('SAS Verification', function () {
 
     aliceCrypto = new CryptoManager()
     await aliceCrypto.initialize(aliceCreds.user_id, aliceCreds.device_id)
-    await aliceHTTP.processOutgoingCryptoRequests(aliceCrypto)
+    await processOutgoingRequests(aliceHTTP, aliceCrypto)
 
     bobCrypto = new CryptoManager()
     await bobCrypto.initialize(bobCreds.user_id, bobCreds.device_id)
-    await bobHTTP.processOutgoingCryptoRequests(bobCrypto)
+    await processOutgoingRequests(bobHTTP, bobCrypto)
 
     // Create a shared room so they discover each other's devices
     const room = await aliceHTTP.createRoom({

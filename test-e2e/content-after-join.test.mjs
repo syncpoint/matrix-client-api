@@ -22,6 +22,7 @@ import { StructureAPI } from '../src/structure-api.mjs'
 import { CommandAPI } from '../src/command-api.mjs'
 import { TimelineAPI } from '../src/timeline-api.mjs'
 import { CryptoManager } from '../src/crypto.mjs'
+import { CryptoFacade } from '../src/crypto-facade.mjs'
 import { Project } from '../src/project.mjs'
 import { ProjectList } from '../src/project-list.mjs'
 import { setLogger } from '../src/logger.mjs'
@@ -78,16 +79,31 @@ async function registerUser (username, deviceId) {
   }
 }
 
+async function processOutgoingRequests (httpAPI, crypto) {
+  const requests = await crypto.outgoingRequests()
+  for (const request of requests) {
+    const response = await httpAPI.sendOutgoingCryptoRequest(request)
+    await crypto.markRequestAsSent(request.id, request.type, response)
+  }
+}
+
 async function buildStack (credentials) {
   const httpAPI = new HttpAPI(credentials)
   const crypto = new CryptoManager()
   await crypto.initialize(credentials.user_id, credentials.device_id)
-  await httpAPI.processOutgoingCryptoRequests(crypto)
+  await processOutgoingRequests(httpAPI, crypto)
 
   const structureAPI = new StructureAPI(httpAPI)
   const db = createDB()
-  const commandAPI = new CommandAPI(httpAPI, crypto, db)
-  const timelineAPI = new TimelineAPI(httpAPI, { cryptoManager: crypto, httpAPI })
+  const facade = new CryptoFacade(crypto, httpAPI)
+  const commandAPI = new CommandAPI(httpAPI, {
+    encryptEvent: (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds),
+    db
+  })
+  const timelineAPI = new TimelineAPI(httpAPI, {
+    onSyncResponse: (data) => facade.processSyncResponse(data),
+    decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
+  })
 
   return { httpAPI, crypto, structureAPI, commandAPI, timelineAPI }
 }
@@ -176,14 +192,14 @@ describe('Content after Join', function () {
       aSync.to_device?.events || [], aSync.device_lists || {},
       aSync.device_one_time_keys_count || {}, []
     )
-    await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
+    await processOutgoingRequests(alice.httpAPI, alice.crypto)
 
     const bSync = await bob.httpAPI.sync(undefined, undefined, 0)
     await bob.crypto.receiveSyncChanges(
       bSync.to_device?.events || [], bSync.device_lists || {},
       bSync.device_one_time_keys_count || {}, []
     )
-    await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+    await processOutgoingRequests(bob.httpAPI, bob.crypto)
 
     // === Step 4: Alice posts content to the layer ===
     console.log('\n--- Step 4: Alice posts content ---')
@@ -231,7 +247,7 @@ describe('Content after Join', function () {
       bSync2.to_device?.events || [], bSync2.device_lists || {},
       bSync2.device_one_time_keys_count || {}, []
     )
-    await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+    await processOutgoingRequests(bob.httpAPI, bob.crypto)
     console.log('Bob synced and processed to_device events')
 
     // Register encryption for Bob

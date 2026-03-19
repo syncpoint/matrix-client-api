@@ -22,6 +22,7 @@ import { HttpAPI } from '../src/http-api.mjs'
 import { StructureAPI } from '../src/structure-api.mjs'
 import { TimelineAPI } from '../src/timeline-api.mjs'
 import { CryptoManager } from '../src/crypto.mjs'
+import { CryptoFacade } from '../src/crypto-facade.mjs'
 import { setLogger } from '../src/logger.mjs'
 import { Base64 } from 'js-base64'
 
@@ -69,8 +70,25 @@ async function registerUser (username, deviceId) {
 function buildAPIs (credentials, crypto = null) {
   const httpAPI = new HttpAPI(credentials)
   const structureAPI = new StructureAPI(httpAPI)
-  const timelineAPI = new TimelineAPI(httpAPI, crypto ? { cryptoManager: crypto, httpAPI } : null)
+  let timelineAPI
+  if (crypto) {
+    const facade = new CryptoFacade(crypto, httpAPI)
+    timelineAPI = new TimelineAPI(httpAPI, {
+      onSyncResponse: (data) => facade.processSyncResponse(data),
+      decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
+    })
+  } else {
+    timelineAPI = new TimelineAPI(httpAPI)
+  }
   return { httpAPI, structureAPI, timelineAPI }
+}
+
+async function processOutgoingRequests (httpAPI, crypto) {
+  const requests = await crypto.outgoingRequests()
+  for (const request of requests) {
+    const response = await httpAPI.sendOutgoingCryptoRequest(request)
+    await crypto.markRequestAsSent(request.id, request.type, response)
+  }
 }
 
 /**
@@ -90,7 +108,7 @@ async function postOperations (httpAPI, roomId, operations, crypto = null, membe
     }
     const encrypted = await crypto.encryptRoomEvent(roomId, ODIN_OP_TYPE, eventContent)
     await httpAPI.sendMessageEvent(roomId, 'm.room.encrypted', encrypted)
-    await httpAPI.processOutgoingCryptoRequests(crypto)
+    await processOutgoingRequests(httpAPI, crypto)
   } else {
     await httpAPI.sendMessageEvent(roomId, ODIN_OP_TYPE, eventContent)
   }
@@ -108,7 +126,7 @@ async function doSync (httpAPI, crypto, since, timeout = 0) {
       syncResult.device_one_time_keys_count || {},
       syncResult.device_unused_fallback_key_types || []
     )
-    await httpAPI.processOutgoingCryptoRequests(crypto)
+    await processOutgoingRequests(httpAPI, crypto)
   }
   return syncResult
 }
@@ -166,8 +184,8 @@ describe('Sync-Gated Content (E2E)', function () {
     bob = buildAPIs(bobCreds, bobCrypto)
 
     // Initial key upload
-    await alice.httpAPI.processOutgoingCryptoRequests(aliceCrypto)
-    await bob.httpAPI.processOutgoingCryptoRequests(bobCrypto)
+    await processOutgoingRequests(alice.httpAPI, aliceCrypto)
+    await processOutgoingRequests(bob.httpAPI, bobCrypto)
   })
 
   after(async function () {
