@@ -21,6 +21,7 @@ import assert from 'node:assert/strict'
 import { HttpAPI } from '../src/http-api.mjs'
 import { StructureAPI } from '../src/structure-api.mjs'
 import { CommandAPI } from '../src/command-api.mjs'
+import { RoomMemberCache } from '../src/room-members.mjs'
 import { TimelineAPI } from '../src/timeline-api.mjs'
 import { Project } from '../src/project.mjs'
 import { ProjectList } from '../src/project-list.mjs'
@@ -86,14 +87,14 @@ async function buildStack (credentials) {
 
   const structureAPI = new StructureAPI(httpAPI)
   const db = createDB()
-  const getMemberIds = async (roomId) => {
+  const memberCache = new RoomMemberCache(async (roomId) => {
     const members = await httpAPI.members(roomId)
     return (members.chunk || [])
       .filter(e => e.content?.membership === 'join')
       .map(e => e.state_key)
       .filter(Boolean)
-  }
-  const commandAPI = new CommandAPI(httpAPI, getMemberIds, { db })
+  })
+  const commandAPI = new CommandAPI(httpAPI, memberCache, { db })
   const timelineAPI = new TimelineAPI(httpAPI)
 
   return {

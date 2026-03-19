@@ -4,14 +4,14 @@ import { getLogger } from './logger.mjs'
 class CommandAPI {
   /**
    * @param {import('./http-api.mjs').HttpAPI} httpAPI
-   * @param {Function} getMemberIds - async (roomId) => string[] — returns joined member IDs for a room
+   * @param {import('./room-members.mjs').RoomMemberCache} memberCache
    * @param {Object} [options={}]
    * @param {Function} [options.encryptEvent] - async (roomId, eventType, content, memberIds) => encryptedContent
    * @param {Object} [options.db] - A levelup-compatible database instance for persistent queue storage
    */
-  constructor (httpAPI, getMemberIds, options = {}) {
+  constructor (httpAPI, memberCache, options = {}) {
     this.httpAPI = httpAPI
-    this.getMemberIds = getMemberIds
+    this.memberCache = memberCache
     this.encryptEvent = options.encryptEvent || null
     this.scheduledCalls = new FIFO(options.db)
   }
@@ -77,7 +77,7 @@ class CommandAPI {
         if (this.encryptEvent && functionName === 'sendMessageEvent') {
           const [roomId, eventType, content, ...rest] = params
           try {
-            const memberIds = await this.getMemberIds(roomId)
+            const memberIds = await this.memberCache.getMembers(roomId)
             const encrypted = await this.encryptEvent(roomId, eventType, content, memberIds)
             params = [roomId, 'm.room.encrypted', encrypted, ...rest]
           } catch (encryptError) {

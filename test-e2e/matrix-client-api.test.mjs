@@ -16,6 +16,7 @@ import assert from 'assert'
 import { HttpAPI } from '../src/http-api.mjs'
 import { StructureAPI } from '../src/structure-api.mjs'
 import { CommandAPI } from '../src/command-api.mjs'
+import { RoomMemberCache } from '../src/room-members.mjs'
 import { TimelineAPI } from '../src/timeline-api.mjs'
 import { CryptoManager } from '../src/crypto.mjs'
 import { CryptoFacade } from '../src/crypto-facade.mjs'
@@ -87,14 +88,14 @@ async function buildStack (credentials) {
 
   const structureAPI = new StructureAPI(httpAPI)
   const facade = new CryptoFacade(crypto, httpAPI)
-  const getMemberIds = async (roomId) => {
+  const memberCache = new RoomMemberCache(async (roomId) => {
     const members = await httpAPI.members(roomId)
     return (members.chunk || [])
       .filter(e => e.content?.membership === 'join')
       .map(e => e.state_key)
       .filter(Boolean)
-  }
-  const commandAPI = new CommandAPI(httpAPI, getMemberIds, {
+  })
+  const commandAPI = new CommandAPI(httpAPI, memberCache, {
     encryptEvent: (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds),
     db: createDB()
   })
