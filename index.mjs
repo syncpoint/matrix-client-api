@@ -157,6 +157,9 @@ const MatrixClient = (loginData) => {
             memberCache.removeMember(roomId, userId)
           }
         },
+        onRoomLeft: (roomId) => {
+          memberCache.remove(roomId)
+        },
         crypto: facade ? {
           isEnabled: true,
           registerRoom: (roomId, enc) => facade.registerRoom(roomId, enc),

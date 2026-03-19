@@ -20,12 +20,13 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI, getMemberIds, onMembershipChanged, crypto = {} }) {
+const Project = function ({ structureAPI, timelineAPI, commandAPI, getMemberIds, onMembershipChanged, onRoomLeft, crypto = {} }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
   this.getMemberIds = getMemberIds
   this.onMembershipChanged = onMembershipChanged || null
+  this.onRoomLeft = onRoomLeft || null
   this.crypto = crypto
 
   this.idMapping = new Map()
@@ -194,6 +195,7 @@ Project.prototype.leaveLayer = async function (layerId) {
   const layer = await this.structureAPI.getLayer(upstreamId)
 
   await this.structureAPI.leave(upstreamId)
+  if (this.onRoomLeft) this.onRoomLeft(upstreamId)
   this.idMapping.forget(layerId)
   this.idMapping.forget(upstreamId)
 
