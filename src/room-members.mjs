@@ -21,9 +21,13 @@ class RoomMemberCache {
     if (this.rooms.has(roomId)) {
       return Array.from(this.rooms.get(roomId))
     }
-    const memberIds = await this.fetchMembers(roomId)
-    this.rooms.set(roomId, new Set(memberIds))
-    return memberIds
+    try {
+      const memberIds = await this.fetchMembers(roomId)
+      this.rooms.set(roomId, new Set(memberIds))
+      return memberIds
+    } catch {
+      return []
+    }
   }
 
   /**
