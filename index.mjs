@@ -8,6 +8,7 @@ import { discover, errors } from './src/discover-api.mjs'
 import { setLogger, LEVELS, consoleLogger, noopLogger } from './src/logger.mjs'
 import { chill } from './src/convenience.mjs'
 import { CryptoManager, TrustRequirement, VerificationMethod, VerificationRequestPhase } from './src/crypto.mjs'
+import { CryptoFacade } from './src/crypto-facade.mjs'
 
 /*
   connect() resolves if the home_server can be connected. It does
@@ -43,44 +44,44 @@ const connect = (home_server_url) => async (controller) => {
  * @property {string} [encryption.storeName] - IndexedDB store name for persistent crypto state (e.g. 'crypto-<projectUUID>')
  * @property {string} [encryption.passphrase] - Passphrase to encrypt the IndexedDB store
  * @property {Object} db - A levelup-compatible database instance for the persistent command queue
- * 
- * @param {LoginData} loginData 
+ *
+ * @param {LoginData} loginData
  * @returns {Object} matrixClient
  */
 const MatrixClient = (loginData) => {
 
   const encryption = loginData.encryption || null
 
-  // Shared CryptoManager instance – initialized once, reused across projectList/project calls
-  let sharedCryptoManager = null
+  // Shared CryptoFacade instance – initialized once, reused across projectList/project calls
+  let sharedFacade = null
   let cryptoInitialized = false
 
   /**
-   * Get or create the shared CryptoManager.
+   * Get or create the shared CryptoFacade.
    * If encryption.storeName is provided, uses IndexedDB-backed persistent store.
    * Otherwise, uses in-memory store (keys lost on restart).
    * @param {HttpAPI} httpAPI
-   * @returns {Promise<{cryptoManager: CryptoManager, httpAPI: HttpAPI} | null>}
+   * @returns {Promise<CryptoFacade|null>}
    */
   const getCrypto = async (httpAPI) => {
     if (!encryption?.enabled) return null
-    if (sharedCryptoManager) {
-      // Reuse existing CryptoManager, just process any pending outgoing requests
+    if (sharedFacade) {
+      // Reuse existing facade, just process any pending outgoing requests
       if (!cryptoInitialized) {
-        await httpAPI.processOutgoingCryptoRequests(sharedCryptoManager)
+        await sharedFacade.processOutgoingRequests()
         cryptoInitialized = true
       }
-      return { cryptoManager: sharedCryptoManager, httpAPI }
+      return sharedFacade
     }
     const credentials = httpAPI.credentials
     if (!credentials.device_id) {
       throw new Error('E2EE requires a device_id in credentials. Ensure a fresh login (delete .state.json if reusing saved credentials).')
     }
-    sharedCryptoManager = new CryptoManager()
+    const cryptoManager = new CryptoManager()
 
     if (encryption.storeName) {
       // Persistent store: crypto state survives restarts (requires IndexedDB, i.e. Electron/browser)
-      await sharedCryptoManager.initializeWithStore(
+      await cryptoManager.initializeWithStore(
         credentials.user_id,
         credentials.device_id,
         encryption.storeName,
@@ -88,24 +89,28 @@ const MatrixClient = (loginData) => {
       )
     } else {
       // In-memory: keys are lost on restart (for testing or non-browser environments)
-      await sharedCryptoManager.initialize(credentials.user_id, credentials.device_id)
+      await cryptoManager.initialize(credentials.user_id, credentials.device_id)
     }
 
-    await httpAPI.processOutgoingCryptoRequests(sharedCryptoManager)
+    sharedFacade = new CryptoFacade(cryptoManager, httpAPI)
+    await sharedFacade.processOutgoingRequests()
     cryptoInitialized = true
-    return { cryptoManager: sharedCryptoManager, httpAPI }
+    return sharedFacade
   }
 
   return {
     connect: connect(loginData.home_server_url),
-  
+
     projectList: async mostRecentCredentials => {
       const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
       const httpAPI = new HttpAPI(credentials)
-      const crypto = await getCrypto(httpAPI)
+      const facade = await getCrypto(httpAPI)
       const projectListParames = {
         structureAPI: new StructureAPI(httpAPI),
-        timelineAPI: new TimelineAPI(httpAPI, crypto)
+        timelineAPI: new TimelineAPI(httpAPI, facade ? {
+          onSyncResponse: (data) => facade.processSyncResponse(data),
+          decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
+        } : {})
       }
       const projectList = new ProjectList(projectListParames)
       projectList.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)
@@ -116,12 +121,24 @@ const MatrixClient = (loginData) => {
     project: async mostRecentCredentials => {
       const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
       const httpAPI = new HttpAPI(credentials)
-      const crypto = await getCrypto(httpAPI)
+      const facade = await getCrypto(httpAPI)
       const projectParams = {
         structureAPI: new StructureAPI(httpAPI),
-        timelineAPI: new TimelineAPI(httpAPI, crypto),
-        commandAPI: new CommandAPI(httpAPI, crypto?.cryptoManager || null, loginData.db),
-        cryptoManager: crypto?.cryptoManager || null
+        timelineAPI: new TimelineAPI(httpAPI, facade ? {
+          onSyncResponse: (data) => facade.processSyncResponse(data),
+          decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
+        } : {}),
+        commandAPI: new CommandAPI(httpAPI, {
+          encryptEvent: facade
+            ? (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds)
+            : null,
+          db: loginData.db
+        }),
+        crypto: facade ? {
+          isEnabled: true,
+          registerRoom: (roomId, enc) => facade.registerRoom(roomId, enc),
+          shareHistoricalKeys: (roomId, userIds) => facade.shareHistoricalKeys(roomId, userIds)
+        } : { isEnabled: false }
       }
       const project = new Project(projectParams)
       project.tokenRefreshed = handler => httpAPI.tokenRefreshed(handler)

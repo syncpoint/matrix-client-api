@@ -4,20 +4,21 @@ import { getLogger } from './logger.mjs'
 class CommandAPI {
   /**
    * @param {import('./http-api.mjs').HttpAPI} httpAPI
-   * @param {import('./crypto.mjs').CryptoManager} [cryptoManager] - Optional CryptoManager for E2EE
-   * @param {Object} db - A levelup-compatible database instance for persistent queue storage
+   * @param {Object} [options={}]
+   * @param {Function} [options.encryptEvent] - async (roomId, eventType, content, memberIds) => encryptedContent
+   * @param {Object} [options.db] - A levelup-compatible database instance for persistent queue storage
    */
-  constructor (httpAPI, cryptoManager, db) {
+  constructor (httpAPI, options = {}) {
     this.httpAPI = httpAPI
-    this.cryptoManager = cryptoManager || null
-    this.scheduledCalls = new FIFO(db)
+    this.encryptEvent = options.encryptEvent || null
+    this.scheduledCalls = new FIFO(options.db)
   }
 
   /**
    * @param {FunctionCall} functionCall
-   * @description A functionCall is an array of parameters. The first is the name of the function that will be called. 
+   * @description A functionCall is an array of parameters. The first is the name of the function that will be called.
    * All other params (0..n) must meet the signature of that function.
-   * 
+   *
    * There is no way to retrieve the returning result of that function.
    */
   schedule (functionCall) {
@@ -36,7 +37,7 @@ class CommandAPI {
   async run () {
 
       /**
-   * @param {Number} retryCounter 
+   * @param {Number} retryCounter
    * @returns A promise that resolves after a calculated time depending on the retryCounter using an exponential back-off algorithm. The max. delay is 30s.
    */
     const chill = retryCounter => new Promise(resolve => {
@@ -50,7 +51,7 @@ class CommandAPI {
 
     if (this.controller) return
     this.controller = new AbortController()
-    
+
     let retryCounter = 0
     let entry
 
@@ -70,65 +71,16 @@ class CommandAPI {
         }
 
         // Encrypt outgoing message events if crypto is available
-        if (this.cryptoManager && functionName === 'sendMessageEvent') {
+        if (this.encryptEvent && functionName === 'sendMessageEvent') {
           const [roomId, eventType, content, ...rest] = params
           const log = getLogger()
           try {
-            // 1. Get room members
             const members = await this.httpAPI.members(roomId)
             const memberIds = (members.chunk || [])
               .filter(e => e.content?.membership === 'join')
               .map(e => e.state_key)
               .filter(Boolean)
-            log.debug('E2EE: room members:', memberIds)
-
-            // 2. Track users and explicitly query their device keys
-            await this.cryptoManager.updateTrackedUsers(memberIds)
-            const keysQueryRequest = await this.cryptoManager.queryKeysForUsers(memberIds)
-            if (keysQueryRequest) {
-              log.debug('E2EE: querying device keys for', memberIds.length, 'users')
-              const queryResponse = await this.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
-              await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
-            }
-
-            // 3. Process any other pending outgoing requests
-            await this.httpAPI.processOutgoingCryptoRequests(this.cryptoManager)
-
-            // 4. Claim missing Olm sessions
-            const claimRequest = await this.cryptoManager.getMissingSessions(memberIds)
-            if (claimRequest) {
-              log.debug('E2EE: claiming missing Olm sessions')
-              const claimResponse = await this.httpAPI.sendOutgoingCryptoRequest(claimRequest)
-              await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
-            }
-
-            // 5. Share Megolm session key with all room members' devices
-            const shareRequests = await this.cryptoManager.shareRoomKey(roomId, memberIds)
-            log.debug('E2EE: shareRoomKey returned', shareRequests.length, 'to_device requests')
-            for (const req of shareRequests) {
-              // Log which devices receive keys vs withheld
-              try {
-                const body = JSON.parse(req.body)
-                const eventType = req.event_type || req.eventType || 'unknown'
-                log.debug(`E2EE: to_device type=${eventType}`)
-                if (body.messages) {
-                  for (const [userId, devices] of Object.entries(body.messages)) {
-                    for (const [deviceId, content] of Object.entries(devices)) {
-                      log.debug(`E2EE:   → ${userId} / ${deviceId}`)
-                    }
-                  }
-                }
-              } catch { /* ignore parse errors */ }
-              const resp = await this.httpAPI.sendOutgoingCryptoRequest(req)
-              await this.cryptoManager.markRequestAsSent(req.id, req.type, resp)
-            }
-
-            // 6. Process any remaining outgoing requests
-            await this.httpAPI.processOutgoingCryptoRequests(this.cryptoManager)
-
-            // 7. Encrypt the actual message
-            const encrypted = await this.cryptoManager.encryptRoomEvent(roomId, eventType, content)
-            log.debug('E2EE: message encrypted for room', roomId)
+            const encrypted = await this.encryptEvent(roomId, eventType, content, memberIds)
             params = [roomId, 'm.room.encrypted', encrypted, ...rest]
           } catch (encryptError) {
             log.warn('Encryption failed, sending unencrypted:', encryptError.message)
@@ -146,7 +98,7 @@ class CommandAPI {
         if (error.response?.statusCode === 403) {
           log.error('Command forbidden:', entry.command[0], error.response.body)
         }
-        
+
         /*
           In most cases we will have to deal with socket errors. The users computer may
           be offline or the server might be unreachable.
@@ -154,7 +106,7 @@ class CommandAPI {
         this.scheduledCalls.requeue(entry.command, entry.key)
         retryCounter++
       }
-    }    
+    }
   }
 
   async stop () {

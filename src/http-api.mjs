@@ -445,22 +445,6 @@ HttpAPI.prototype.sendOutgoingCryptoRequest = async function (request) {
   }
 }
 
-/**
- * Process all outgoing requests from the CryptoManager.
- * @param {import('./crypto.mjs').CryptoManager} cryptoManager
- */
-HttpAPI.prototype.processOutgoingCryptoRequests = async function (cryptoManager) {
-  const requests = await cryptoManager.outgoingRequests()
-  for (const request of requests) {
-    try {
-      const response = await this.sendOutgoingCryptoRequest(request)
-      await cryptoManager.markRequestAsSent(request.id, request.type, response)
-    } catch (error) {
-      getLogger().error('Failed to process outgoing crypto request:', error.message)
-    }
-  }
-}
-
 export {
   HttpAPI
 }

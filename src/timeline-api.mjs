@@ -50,13 +50,14 @@ function applyPostDecryptTypeFilter (roomEvents, originalTypes) {
 
 /**
  * @param {import('./http-api.mjs').HttpAPI} httpApi
- * @param {Object} [crypto] - Optional crypto context
- * @param {import('./crypto.mjs').CryptoManager} [crypto.cryptoManager]
- * @param {import('./http-api.mjs').HttpAPI} [crypto.httpAPI]
+ * @param {Object} [options={}] - Optional crypto callbacks
+ * @param {Function} [options.onSyncResponse] - async (syncData) => void — feed sync data into crypto
+ * @param {Function} [options.decryptEvent]   - async (event, roomId) => decryptedEvent | null
  */
-const TimelineAPI = function (httpApi, crypto) {
+const TimelineAPI = function (httpApi, options = {}) {
   this.httpApi = httpApi
-  this.crypto = crypto || null
+  this.onSyncResponse = options.onSyncResponse || null
+  this.decryptEvent = options.decryptEvent || null
 }
 
 TimelineAPI.prototype.credentials = function () {
@@ -69,7 +70,7 @@ TimelineAPI.prototype.content = async function (roomId, filter, from) {
   // Augment the filter for crypto: add m.room.encrypted to types
   let effectiveFilter = filter
   let originalTypes = null
-  if (this.crypto && filter?.types && !filter.types.includes(M_ROOM_ENCRYPTED)) {
+  if (this.decryptEvent && filter?.types && !filter.types.includes(M_ROOM_ENCRYPTED)) {
     effectiveFilter = { ...filter, types: [...filter.types, M_ROOM_ENCRYPTED] }
     originalTypes = filter.types
   }
@@ -77,21 +78,12 @@ TimelineAPI.prototype.content = async function (roomId, filter, from) {
   const result = await this.catchUp(roomId, null, null, 'f', effectiveFilter)
 
   // Decrypt + post-filter
-  if (this.crypto && result.events) {
-    const { cryptoManager } = this.crypto
-    const log = getLogger()
+  if (this.decryptEvent && result.events) {
     for (let i = 0; i < result.events.length; i++) {
       if (result.events[i].type === M_ROOM_ENCRYPTED) {
-        const decrypted = await cryptoManager.decryptRoomEvent(result.events[i], roomId)
+        const decrypted = await this.decryptEvent(result.events[i], roomId)
         if (decrypted) {
-          result.events[i] = {
-            ...result.events[i],
-            type: decrypted.event.type,
-            content: decrypted.event.content,
-            decrypted: true
-          }
-        } else {
-          log.warn('Could not decrypt event in room', roomId, result.events[i].event_id)
+          result.events[i] = decrypted
         }
       }
     }
@@ -108,8 +100,8 @@ TimelineAPI.prototype.content = async function (roomId, filter, from) {
 TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) {
   /*
     We want the complete timeline for all rooms that we have already joined. Thus we get the most recent
-    events and then iterate over partial results until we filled the gap. The order of the events shall be 
-    oldes first. 
+    events and then iterate over partial results until we filled the gap. The order of the events shall be
+    oldes first.
 
     All events regarding invited rooms will not be catched up since we are typically interested in invitations
     and name changes only.
@@ -118,25 +110,23 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   // When crypto is active, inject 'm.room.encrypted' into the server-side filter
   // so encrypted events are not silently dropped. The original types are preserved
   // for post-decryption client-side filtering.
-  const effectiveFilter = this.crypto ? augmentFilterForCrypto(filter) : filter
+  const effectiveFilter = this.decryptEvent ? augmentFilterForCrypto(filter) : filter
   const originalTypes = effectiveFilter?.room?.timeline?._originalTypes || null
 
   const events = {}
-  // for catching up 
+  // for catching up
   const jobs = {}
 
   const syncResult = await this.httpApi.sync(since, effectiveFilter, timeout)
 
   // Feed crypto state from sync response
-  if (this.crypto) {
-    const { cryptoManager, httpAPI } = this.crypto
+  if (this.onSyncResponse) {
     const toDeviceEvents = syncResult.to_device?.events || []
     const deviceLists = syncResult.device_lists || {}
     const oneTimeKeyCounts = syncResult.device_one_time_keys_count || {}
     const unusedFallbackKeys = syncResult.device_unused_fallback_key_types || undefined
 
-    await cryptoManager.receiveSyncChanges(toDeviceEvents, deviceLists, oneTimeKeyCounts, unusedFallbackKeys)
-    await httpAPI.processOutgoingCryptoRequests(cryptoManager)
+    await this.onSyncResponse({ toDeviceEvents, deviceLists, oneTimeKeyCounts, unusedFallbackKeys })
   }
 
   const stateEvents = {}
@@ -165,7 +155,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   const catchUp = await Promise.all(
     Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', effectiveFilter?.room?.timeline))
   )
-  /* 
+  /*
     Since we walk backwards ('b') in time we need to append the events at the head of the array
     in order to maintain the chronological order (oldest first).
   */
@@ -174,22 +164,13 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   })
 
   // Decrypt encrypted events if crypto is available
-  if (this.crypto) {
-    const { cryptoManager } = this.crypto
-    const log = getLogger()
+  if (this.decryptEvent) {
     for (const [roomId, roomEvents] of Object.entries(events)) {
       for (let i = 0; i < roomEvents.length; i++) {
         if (roomEvents[i].type === M_ROOM_ENCRYPTED) {
-          const decrypted = await cryptoManager.decryptRoomEvent(roomEvents[i], roomId)
+          const decrypted = await this.decryptEvent(roomEvents[i], roomId)
           if (decrypted) {
-            roomEvents[i] = {
-              ...roomEvents[i],
-              type: decrypted.event.type,
-              content: decrypted.event.content,
-              decrypted: true
-            }
-          } else {
-            log.warn('Could not decrypt event in room', roomId, roomEvents[i].event_id)
+            roomEvents[i] = decrypted
           }
         }
       }
@@ -219,7 +200,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
 
 TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, dir = 'b', filter = {}) {
 
-  const queryOptions = { 
+  const queryOptions = {
     filter,
     dir,
     to: lastKnownStreamToken,
@@ -228,8 +209,8 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 
   // Properties "from" and "limited" will be modified during catchUp-phase
   const pagination = {
-    from: currentStreamToken,    
-    limited: true                      
+    from: currentStreamToken,
+    limited: true
   }
 
   // The order of events is newest to oldest since we move backwards on the timeline.
@@ -255,12 +236,12 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 
 
 TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = (new AbortController()).signal) {
-  
-  
+
+
 
   let streamToken = since
   let retryCounter = 0
-  
+
   while (!signal.aborted) {
     try {
       await chill(retryCounter)
@@ -274,7 +255,7 @@ TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = 
     } catch (error) {
       retryCounter++
       yield new Error(error)
-    }      
+    }
   }
 }
 
