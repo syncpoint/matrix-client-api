@@ -66,6 +66,7 @@ async function registerUser (username) {
     user_id: data.user_id,
     access_token: data.access_token,
     device_id: data.device_id,
+    home_server: 'odin.battlefield',
     home_server_url: HOMESERVER_URL
   }
 }
