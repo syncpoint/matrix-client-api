@@ -14,16 +14,19 @@ class RoomMemberCache {
 
   /**
    * Get member IDs for a room. Fetches from server on cache miss.
+   * On network failure, returns the existing cached members (possibly empty).
    * @param {string} roomId
    * @returns {Promise<string[]>}
    */
   async getMembers (roomId) {
-    if (this.rooms.has(roomId)) {
-      return Array.from(this.rooms.get(roomId))
+    try {
+      const memberIds = await this.fetchMembers(roomId)
+      this.rooms.set(roomId, new Set(memberIds))
+      return memberIds
+    } catch {
+      const cached = this.rooms.get(roomId)
+      return cached ? Array.from(cached) : []
     }
-    const memberIds = await this.fetchMembers(roomId)
-    this.rooms.set(roomId, new Set(memberIds))
-    return memberIds
   }
 
   /**
