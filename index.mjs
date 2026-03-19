@@ -9,6 +9,7 @@ import { setLogger, LEVELS, consoleLogger, noopLogger } from './src/logger.mjs'
 import { chill } from './src/convenience.mjs'
 import { CryptoManager, TrustRequirement, VerificationMethod, VerificationRequestPhase } from './src/crypto.mjs'
 import { CryptoFacade } from './src/crypto-facade.mjs'
+import { RoomMemberCache } from './src/room-members.mjs'
 
 /*
   connect() resolves if the home_server can be connected. It does
@@ -122,6 +123,20 @@ const MatrixClient = (loginData) => {
       const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
       const httpAPI = new HttpAPI(credentials)
       const facade = await getCrypto(httpAPI)
+      const memberCache = new RoomMemberCache()
+
+      const getMemberIds = async (roomId) => {
+        const cached = memberCache.get(roomId)
+        if (cached) return cached
+        const members = await httpAPI.members(roomId)
+        const ids = (members.chunk || [])
+          .filter(e => e.content?.membership === 'join')
+          .map(e => e.state_key)
+          .filter(Boolean)
+        memberCache.set(roomId, ids)
+        return ids
+      }
+
       const projectParams = {
         structureAPI: new StructureAPI(httpAPI),
         timelineAPI: new TimelineAPI(httpAPI, facade ? {
@@ -132,8 +147,10 @@ const MatrixClient = (loginData) => {
           encryptEvent: facade
             ? (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds)
             : null,
+          getMemberIds,
           db: loginData.db
         }),
+        memberCache,
         crypto: facade ? {
           isEnabled: true,
           registerRoom: (roomId, enc) => facade.registerRoom(roomId, enc),
