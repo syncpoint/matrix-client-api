@@ -52,6 +52,7 @@ class CommandAPI {
     if (this.controller) return
     this.controller = new AbortController()
 
+    const log = getLogger()
     let retryCounter = 0
     let entry
 
@@ -73,7 +74,6 @@ class CommandAPI {
         // Encrypt outgoing message events if crypto is available
         if (this.encryptEvent && functionName === 'sendMessageEvent') {
           const [roomId, eventType, content, ...rest] = params
-          const log = getLogger()
           try {
             const members = await this.httpAPI.members(roomId)
             const memberIds = (members.chunk || [])
@@ -89,11 +89,9 @@ class CommandAPI {
 
         await this.httpAPI[functionName].apply(this.httpAPI, params)
         await this.scheduledCalls.acknowledge(key)
-        const log = getLogger()
         log.debug('Command sent:', functionName)
         retryCounter = 0
       } catch (error) {
-        const log = getLogger()
         log.warn('Command failed:', error.message)
         if (error.response?.statusCode === 403) {
           log.error('Command forbidden:', entry.command[0], error.response.body)
