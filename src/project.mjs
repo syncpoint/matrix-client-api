@@ -403,21 +403,22 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       }
 
       if (isMembershipChanged(content)) {
-        const memberEvents = content.filter(e => e.type === M_ROOM_MEMBER)
-
-        // Update cache and build handler payload in one pass
-        const membership = memberEvents.map(event => {
-          if (event.content.membership === 'join') {
-            this.memberCache.addMember(roomId, event.state_key)
-          } else if (event.content.membership === 'leave' || event.content.membership === 'ban') {
-            this.memberCache.removeMember(roomId, event.state_key)
-          }
-          return {
+        const membership = content
+          .filter(event => event.type === M_ROOM_MEMBER)
+          .map(event => ({
             id: this.idMapping.get(roomId),
             membership: event.content.membership,
             subject: event.state_key
+          }))
+
+        for (const change of membership) {
+          if (change.membership === 'join') {
+            this.memberCache.addMember(roomId, change.subject)
+          } else if (change.membership === 'leave' || change.membership === 'ban') {
+            this.memberCache.removeMember(roomId, change.subject)
           }
-        })
+        }
+
         await streamHandler.membershipChanged(membership)
 
         // Safety net: share historical keys with newly joined members.
@@ -425,9 +426,9 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         // but this catches keys created between share and join.
         if (this.crypto.isEnabled) {
           const myUserId = this.timelineAPI.credentials().user_id
-          const newJoinUserIds = memberEvents
-            .filter(event => event.content.membership === 'join' && event.state_key !== myUserId)
-            .map(event => event.state_key)
+          const newJoinUserIds = membership
+            .filter(m => m.membership === 'join' && m.subject !== myUserId)
+            .map(m => m.subject)
 
           if (newJoinUserIds.length > 0) {
             await this.crypto.shareHistoricalKeys(roomId, newJoinUserIds)
