@@ -86,7 +86,14 @@ async function buildStack (credentials) {
 
   const structureAPI = new StructureAPI(httpAPI)
   const db = createDB()
-  const commandAPI = new CommandAPI(httpAPI, { db })
+  const getMemberIds = async (roomId) => {
+    const members = await httpAPI.members(roomId)
+    return (members.chunk || [])
+      .filter(e => e.content?.membership === 'join')
+      .map(e => e.state_key)
+      .filter(Boolean)
+  }
+  const commandAPI = new CommandAPI(httpAPI, getMemberIds, { db })
   const timelineAPI = new TimelineAPI(httpAPI)
 
   return {

@@ -4,15 +4,15 @@ import { getLogger } from './logger.mjs'
 class CommandAPI {
   /**
    * @param {import('./http-api.mjs').HttpAPI} httpAPI
+   * @param {Function} getMemberIds - async (roomId) => string[] — returns joined member IDs for a room
    * @param {Object} [options={}]
    * @param {Function} [options.encryptEvent] - async (roomId, eventType, content, memberIds) => encryptedContent
-   * @param {Function} [options.getMemberIds] - async (roomId) => string[] — cached member lookup with HTTP fallback
    * @param {Object} [options.db] - A levelup-compatible database instance for persistent queue storage
    */
-  constructor (httpAPI, options = {}) {
+  constructor (httpAPI, getMemberIds, options = {}) {
     this.httpAPI = httpAPI
+    this.getMemberIds = getMemberIds
     this.encryptEvent = options.encryptEvent || null
-    this.getMemberIds = options.getMemberIds || null
     this.scheduledCalls = new FIFO(options.db)
   }
 
@@ -77,16 +77,7 @@ class CommandAPI {
         if (this.encryptEvent && functionName === 'sendMessageEvent') {
           const [roomId, eventType, content, ...rest] = params
           try {
-            let memberIds
-            if (this.getMemberIds) {
-              memberIds = await this.getMemberIds(roomId)
-            } else {
-              const members = await this.httpAPI.members(roomId)
-              memberIds = (members.chunk || [])
-                .filter(e => e.content?.membership === 'join')
-                .map(e => e.state_key)
-                .filter(Boolean)
-            }
+            const memberIds = await this.getMemberIds(roomId)
             const encrypted = await this.encryptEvent(roomId, eventType, content, memberIds)
             params = [roomId, 'm.room.encrypted', encrypted, ...rest]
           } catch (encryptError) {

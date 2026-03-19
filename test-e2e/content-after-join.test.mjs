@@ -96,7 +96,14 @@ async function buildStack (credentials) {
   const structureAPI = new StructureAPI(httpAPI)
   const db = createDB()
   const facade = new CryptoFacade(crypto, httpAPI)
-  const commandAPI = new CommandAPI(httpAPI, {
+  const getMemberIds = async (roomId) => {
+    const members = await httpAPI.members(roomId)
+    return (members.chunk || [])
+      .filter(e => e.content?.membership === 'join')
+      .map(e => e.state_key)
+      .filter(Boolean)
+  }
+  const commandAPI = new CommandAPI(httpAPI, getMemberIds, {
     encryptEvent: (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds),
     db
   })

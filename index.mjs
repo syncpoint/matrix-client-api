@@ -143,11 +143,10 @@ const MatrixClient = (loginData) => {
           onSyncResponse: (data) => facade.processSyncResponse(data),
           decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
         } : {}),
-        commandAPI: new CommandAPI(httpAPI, {
+        commandAPI: new CommandAPI(httpAPI, getMemberIds, {
           encryptEvent: facade
             ? (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds)
             : null,
-          getMemberIds,
           db: loginData.db
         }),
         memberCache,
