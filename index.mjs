@@ -123,19 +123,13 @@ const MatrixClient = (loginData) => {
       const credentials = mostRecentCredentials ? mostRecentCredentials : (await HttpAPI.loginWithPassword(loginData))
       const httpAPI = new HttpAPI(credentials)
       const facade = await getCrypto(httpAPI)
-      const memberCache = new RoomMemberCache()
-
-      const getMemberIds = async (roomId) => {
-        const cached = memberCache.get(roomId)
-        if (cached) return cached
+      const memberCache = new RoomMemberCache(async (roomId) => {
         const members = await httpAPI.members(roomId)
-        const ids = (members.chunk || [])
+        return (members.chunk || [])
           .filter(e => e.content?.membership === 'join')
           .map(e => e.state_key)
           .filter(Boolean)
-        memberCache.set(roomId, ids)
-        return ids
-      }
+      })
 
       const projectParams = {
         structureAPI: new StructureAPI(httpAPI),
@@ -143,23 +137,13 @@ const MatrixClient = (loginData) => {
           onSyncResponse: (data) => facade.processSyncResponse(data),
           decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
         } : {}),
-        commandAPI: new CommandAPI(httpAPI, getMemberIds, {
+        commandAPI: new CommandAPI(httpAPI, (roomId) => memberCache.getMembers(roomId), {
           encryptEvent: facade
             ? (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds)
             : null,
           db: loginData.db
         }),
-        getMemberIds,
-        onMembershipChanged: (roomId, userId, membership) => {
-          if (membership === 'join') {
-            memberCache.addMember(roomId, userId)
-          } else if (membership === 'leave' || membership === 'ban') {
-            memberCache.removeMember(roomId, userId)
-          }
-        },
-        onRoomLeft: (roomId) => {
-          memberCache.remove(roomId)
-        },
+        memberCache,
         crypto: facade ? {
           isEnabled: true,
           registerRoom: (roomId, enc) => facade.registerRoom(roomId, enc),

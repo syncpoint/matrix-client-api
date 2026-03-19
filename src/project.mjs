@@ -20,13 +20,11 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI, getMemberIds, onMembershipChanged, onRoomLeft, crypto = {} }) {
+const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {} }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
-  this.getMemberIds = getMemberIds
-  this.onMembershipChanged = onMembershipChanged || null
-  this.onRoomLeft = onRoomLeft || null
+  this.memberCache = memberCache
   this.crypto = crypto
 
   this.idMapping = new Map()
@@ -182,7 +180,7 @@ Project.prototype.shareHistoricalKeys = function (layerId) {
   this.commandAPI.schedule([async () => {
     const myUserId = this.timelineAPI.credentials().user_id
     const projectRoomId = this.idMapping.get(this.projectId)
-    const allMembers = await this.getMemberIds(projectRoomId)
+    const allMembers = await this.memberCache.getMembers(projectRoomId)
     const userIds = allMembers.filter(id => id !== myUserId)
 
     if (userIds.length === 0) return
@@ -195,7 +193,7 @@ Project.prototype.leaveLayer = async function (layerId) {
   const layer = await this.structureAPI.getLayer(upstreamId)
 
   await this.structureAPI.leave(upstreamId)
-  if (this.onRoomLeft) this.onRoomLeft(upstreamId)
+  this.memberCache.remove(upstreamId)
   this.idMapping.forget(layerId)
   this.idMapping.forget(upstreamId)
 
@@ -405,9 +403,11 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       }
 
       if (isMembershipChanged(content)) {
-        if (this.onMembershipChanged) {
-          for (const event of content.filter(e => e.type === M_ROOM_MEMBER)) {
-            this.onMembershipChanged(roomId, event.state_key, event.content.membership)
+        for (const event of content.filter(e => e.type === M_ROOM_MEMBER)) {
+          if (event.content.membership === 'join') {
+            this.memberCache.addMember(roomId, event.state_key)
+          } else if (event.content.membership === 'leave' || event.content.membership === 'ban') {
+            this.memberCache.removeMember(roomId, event.state_key)
           }
         }
 

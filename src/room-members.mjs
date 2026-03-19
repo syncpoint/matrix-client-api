@@ -1,29 +1,29 @@
 /**
  * In-memory cache for room membership.
- * Event-driven: updated by sync stream membership events, not by polling.
+ *
+ * Self-sufficient: fetches members from the server on cache miss via the
+ * provided fetch callback. Updated by sync stream membership events.
+ *
+ * @param {Function} fetchMembers - async (roomId) => string[] — fetches joined member IDs from the server
  */
 class RoomMemberCache {
-  constructor () {
+  constructor (fetchMembers) {
     this.rooms = new Map()
+    this.fetchMembers = fetchMembers
   }
 
   /**
-   * Set the full member list for a room (initial population).
+   * Get member IDs for a room. Fetches from server on cache miss.
    * @param {string} roomId
-   * @param {string[]} memberIds
+   * @returns {Promise<string[]>}
    */
-  set (roomId, memberIds) {
+  async getMembers (roomId) {
+    if (this.rooms.has(roomId)) {
+      return Array.from(this.rooms.get(roomId))
+    }
+    const memberIds = await this.fetchMembers(roomId)
     this.rooms.set(roomId, new Set(memberIds))
-  }
-
-  /**
-   * Get cached member IDs for a room.
-   * @param {string} roomId
-   * @returns {string[]|null} Member IDs or null if room is not cached
-   */
-  get (roomId) {
-    const members = this.rooms.get(roomId)
-    return members ? Array.from(members) : null
+    return memberIds
   }
 
   /**
@@ -51,16 +51,7 @@ class RoomMemberCache {
   }
 
   /**
-   * Whether a room has cached membership data.
-   * @param {string} roomId
-   * @returns {boolean}
-   */
-  has (roomId) {
-    return this.rooms.has(roomId)
-  }
-
-  /**
-   * Remove a room from the cache (on leave).
+   * Discard a room entirely (on leave).
    * @param {string} roomId
    */
   remove (roomId) {
