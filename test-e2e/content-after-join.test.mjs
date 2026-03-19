@@ -27,6 +27,16 @@ import { ProjectList } from '../src/project-list.mjs'
 import { setLogger } from '../src/logger.mjs'
 import { Base64 } from 'js-base64'
 
+import levelup from 'levelup'
+import memdown from 'memdown'
+import subleveldown from 'subleveldown'
+
+const createDB = () => {
+  const db = levelup(memdown())
+  const s = subleveldown(db, 'command-queue', { valueEncoding: 'json' })
+  return s
+}
+
 const HOMESERVER_URL = process.env.HOMESERVER_URL || 'http://localhost:8008'
 const suffix = Date.now().toString(36)
 
@@ -75,7 +85,8 @@ async function buildStack (credentials) {
   await httpAPI.processOutgoingCryptoRequests(crypto)
 
   const structureAPI = new StructureAPI(httpAPI)
-  const commandAPI = new CommandAPI(httpAPI, crypto)
+  const db = createDB()
+  const commandAPI = new CommandAPI(httpAPI, crypto, db)
   const timelineAPI = new TimelineAPI(httpAPI, { cryptoManager: crypto, httpAPI })
 
   return { httpAPI, crypto, structureAPI, commandAPI, timelineAPI }
