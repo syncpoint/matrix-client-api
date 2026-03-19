@@ -149,7 +149,14 @@ const MatrixClient = (loginData) => {
             : null,
           db: loginData.db
         }),
-        memberCache,
+        getMemberIds,
+        onMembershipChanged: (roomId, userId, membership) => {
+          if (membership === 'join') {
+            memberCache.addMember(roomId, userId)
+          } else if (membership === 'leave' || membership === 'ban') {
+            memberCache.removeMember(roomId, userId)
+          }
+        },
         crypto: facade ? {
           isEnabled: true,
           registerRoom: (roomId, enc) => facade.registerRoom(roomId, enc),

@@ -20,11 +20,12 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {} }) {
+const Project = function ({ structureAPI, timelineAPI, commandAPI, getMemberIds, onMembershipChanged, crypto = {} }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
-  this.memberCache = memberCache || null
+  this.getMemberIds = getMemberIds
+  this.onMembershipChanged = onMembershipChanged || null
   this.crypto = crypto
 
   this.idMapping = new Map()
@@ -86,17 +87,7 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
     }
   }
 
-  if (this.memberCache) {
-    const allRoomIds = [upstreamId, ...Object.keys(hierarchy.layers)]
-    for (const roomId of allRoomIds) {
-      const members = await this.commandAPI.httpAPI.members(roomId)
-      const memberIds = (members.chunk || [])
-        .filter(e => e.content?.membership === 'join')
-        .map(e => e.state_key)
-        .filter(Boolean)
-      this.memberCache.set(roomId, memberIds)
-    }
-  }
+
 
   const projectStructure = {
     id,
@@ -159,15 +150,6 @@ Project.prototype.joinLayer = async function (layerId) {
     await this.crypto.registerRoom(room.room_id, room.encryption)
   }
 
-  if (this.memberCache) {
-    const members = await this.commandAPI.httpAPI.members(room.room_id)
-    const memberIds = (members.chunk || [])
-      .filter(e => e.content?.membership === 'join')
-      .map(e => e.state_key)
-      .filter(Boolean)
-    this.memberCache.set(room.room_id, memberIds)
-  }
-
   // Mark for sync-gated content fetch: content will be loaded once the room
   // appears in a sync response, not immediately after join.
   this.pendingContent.add(room.room_id)
@@ -199,17 +181,8 @@ Project.prototype.shareHistoricalKeys = function (layerId) {
   this.commandAPI.schedule([async () => {
     const myUserId = this.timelineAPI.credentials().user_id
     const projectRoomId = this.idMapping.get(this.projectId)
-
-    let userIds
-    if (this.memberCache && this.memberCache.has(projectRoomId)) {
-      userIds = this.memberCache.get(projectRoomId).filter(id => id !== myUserId)
-    } else {
-      const members = await this.commandAPI.httpAPI.members(projectRoomId)
-      userIds = (members.chunk || [])
-        .filter(e => e.content?.membership === 'join')
-        .map(e => e.state_key)
-        .filter(id => id !== myUserId)
-    }
+    const allMembers = await this.getMemberIds(projectRoomId)
+    const userIds = allMembers.filter(id => id !== myUserId)
 
     if (userIds.length === 0) return
     await this.crypto.shareHistoricalKeys(roomId, userIds)
@@ -221,7 +194,6 @@ Project.prototype.leaveLayer = async function (layerId) {
   const layer = await this.structureAPI.getLayer(upstreamId)
 
   await this.structureAPI.leave(upstreamId)
-  if (this.memberCache) this.memberCache.remove(upstreamId)
   this.idMapping.forget(layerId)
   this.idMapping.forget(upstreamId)
 
@@ -431,13 +403,9 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       }
 
       if (isMembershipChanged(content)) {
-        if (this.memberCache) {
+        if (this.onMembershipChanged) {
           for (const event of content.filter(e => e.type === M_ROOM_MEMBER)) {
-            if (event.content.membership === 'join') {
-              this.memberCache.addMember(roomId, event.state_key)
-            } else if (['leave', 'ban'].includes(event.content.membership)) {
-              this.memberCache.removeMember(roomId, event.state_key)
-            }
+            this.onMembershipChanged(roomId, event.state_key, event.content.membership)
           }
         }
 
