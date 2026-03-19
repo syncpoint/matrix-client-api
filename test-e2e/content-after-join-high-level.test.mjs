@@ -172,7 +172,7 @@ describe('Content after Join', function () {
     await alice.projectList.invite(projectId, bob.userId)
   })
 
-  it('Bob receives a project invitation, acceps it, joins all layers and loads the layer content', async function() {
+  it('Bob receives a project invitation, accepts it, joins all layers and loads the layer content', async function() {
 
     const controller = new AbortController()
     Object.defineProperty(controller.signal, 'id', { value: 'mocha-test', writable: false, enumerable: true })
