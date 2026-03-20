@@ -332,8 +332,11 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     // Sync-gated content fetch: for rooms that were recently joined,
     // wait until they appear in the sync response, then fetch full content.
     // The sync appearance is the server's signal that /messages will work reliably.
+    // Check both timeline events and state events — the room may appear in sync
+    // with only state (e.g. the join event) but no timeline events if the
+    // server-side filter excludes the current user's events via not_senders.
     for (const roomId of this.pendingContent) {
-      if (!chunk.events[roomId]) continue
+      if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
 
       this.pendingContent.delete(roomId)
       const log = getLogger()
