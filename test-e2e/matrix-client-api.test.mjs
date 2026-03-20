@@ -16,8 +16,10 @@ import assert from 'assert'
 import { HttpAPI } from '../src/http-api.mjs'
 import { StructureAPI } from '../src/structure-api.mjs'
 import { CommandAPI } from '../src/command-api.mjs'
+import { RoomMemberCache } from '../src/room-members.mjs'
 import { TimelineAPI } from '../src/timeline-api.mjs'
 import { CryptoManager } from '../src/crypto.mjs'
+import { CryptoFacade } from '../src/crypto-facade.mjs'
 import { setLogger } from '../src/logger.mjs'
 
 import levelup from 'levelup'
@@ -67,6 +69,14 @@ async function registerUser (username, deviceId) {
   }
 }
 
+async function processOutgoingRequests (httpAPI, crypto) {
+  const requests = await crypto.outgoingRequests()
+  for (const request of requests) {
+    const response = await httpAPI.sendOutgoingCryptoRequest(request)
+    await crypto.markRequestAsSent(request.id, request.type, response)
+  }
+}
+
 /** Build the full API stack as ODIN does it. */
 async function buildStack (credentials) {
   const httpAPI = new HttpAPI(credentials)
@@ -74,11 +84,25 @@ async function buildStack (credentials) {
   await crypto.initialize(credentials.user_id, credentials.device_id)
 
   // Upload device keys (same as ODIN does on project open)
-  await httpAPI.processOutgoingCryptoRequests(crypto)
+  await processOutgoingRequests(httpAPI, crypto)
 
   const structureAPI = new StructureAPI(httpAPI)
-  const commandAPI = new CommandAPI(httpAPI, crypto, createDB())
-  const timelineAPI = new TimelineAPI(httpAPI, { cryptoManager: crypto, httpAPI })
+  const facade = new CryptoFacade(crypto, httpAPI)
+  const memberCache = new RoomMemberCache(async (roomId) => {
+    const members = await httpAPI.members(roomId)
+    return (members.chunk || [])
+      .filter(e => e.content?.membership === 'join')
+      .map(e => e.state_key)
+      .filter(Boolean)
+  })
+  const commandAPI = new CommandAPI(httpAPI, memberCache, {
+    encryptEvent: (roomId, type, content, memberIds) => facade.encryptEvent(roomId, type, content, memberIds),
+    db: createDB()
+  })
+  const timelineAPI = new TimelineAPI(httpAPI, {
+    onSyncResponse: (data) => facade.processSyncResponse(data),
+    decryptEvent: (event, roomId) => facade.decryptEvent(event, roomId)
+  })
 
   return { httpAPI, crypto, structureAPI, commandAPI, timelineAPI }
 }
@@ -142,8 +166,8 @@ describe('matrix-client-api E2EE Integration', function () {
 
   describe('Layer 1: HttpAPI + CryptoManager', function () {
 
-    it('device keys should be on the server after processOutgoingCryptoRequests()', async () => {
-      // Bob queries Alice's keys — verifies that HttpAPI.processOutgoingCryptoRequests() worked
+    it('device keys should be on the server after processOutgoingRequests()', async () => {
+      // Bob queries Alice's keys — verifies that processOutgoingRequests() worked
       const result = await bob.httpAPI.client.post('v3/keys/query', {
         json: { device_keys: { [aliceCreds.user_id]: [] } }
       }).json()
@@ -224,8 +248,8 @@ describe('matrix-client-api E2EE Integration', function () {
       await bob.httpAPI.join(roomId)
 
       // Register encryption with both CryptoManagers
-      await alice.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await alice.crypto.setRoomEncryption(roomId)
+      await bob.crypto.setRoomEncryption(roomId)
 
       // Initial sync for both to discover device lists
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
@@ -233,14 +257,14 @@ describe('matrix-client-api E2EE Integration', function () {
         aSync.to_device?.events || [], aSync.device_lists || {},
         aSync.device_one_time_keys_count || {}, []
       )
-      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
+      await processOutgoingRequests(alice.httpAPI, alice.crypto)
 
       const bSync = await bob.httpAPI.sync(undefined, undefined, 0)
       await bob.crypto.receiveSyncChanges(
         bSync.to_device?.events || [], bSync.device_lists || {},
         bSync.device_one_time_keys_count || {}, []
       )
-      await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+      await processOutgoingRequests(bob.httpAPI, bob.crypto)
     })
 
     it('should encrypt and send via schedule() + run()', async () => {
@@ -290,8 +314,8 @@ describe('matrix-client-api E2EE Integration', function () {
       await alice.httpAPI.invite(roomId, bobCreds.user_id)
       await bob.httpAPI.join(roomId)
 
-      await alice.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await alice.crypto.setRoomEncryption(roomId)
+      await bob.crypto.setRoomEncryption(roomId)
 
       // Initial sync for both
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
@@ -299,7 +323,7 @@ describe('matrix-client-api E2EE Integration', function () {
         aSync.to_device?.events || [], aSync.device_lists || {},
         aSync.device_one_time_keys_count || {}, []
       )
-      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
+      await processOutgoingRequests(alice.httpAPI, alice.crypto)
       aliceSyncToken = aSync.next_batch
 
       const bSync = await bob.httpAPI.sync(undefined, undefined, 0)
@@ -307,7 +331,7 @@ describe('matrix-client-api E2EE Integration', function () {
         bSync.to_device?.events || [], bSync.device_lists || {},
         bSync.device_one_time_keys_count || {}, []
       )
-      await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+      await processOutgoingRequests(bob.httpAPI, bob.crypto)
 
       // Alice sends an encrypted message via CommandAPI
       alice.commandAPI.schedule([
@@ -358,8 +382,8 @@ describe('matrix-client-api E2EE Integration', function () {
       await bob.httpAPI.join(layer.globalId)
 
       // 3. Register encryption
-      await alice.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await alice.crypto.setRoomEncryption(layer.globalId)
+      await bob.crypto.setRoomEncryption(layer.globalId)
 
       // 4. Initial sync both
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
@@ -367,14 +391,14 @@ describe('matrix-client-api E2EE Integration', function () {
         aSync.to_device?.events || [], aSync.device_lists || {},
         aSync.device_one_time_keys_count || {}, []
       )
-      await alice.httpAPI.processOutgoingCryptoRequests(alice.crypto)
+      await processOutgoingRequests(alice.httpAPI, alice.crypto)
 
       const bSync = await bob.httpAPI.sync(undefined, undefined, 0)
       await bob.crypto.receiveSyncChanges(
         bSync.to_device?.events || [], bSync.device_lists || {},
         bSync.device_one_time_keys_count || {}, []
       )
-      await bob.httpAPI.processOutgoingCryptoRequests(bob.crypto)
+      await processOutgoingRequests(bob.httpAPI, bob.crypto)
 
       // 5. CommandAPI: Alice sends 2 ODIN operations
       alice.commandAPI.schedule([

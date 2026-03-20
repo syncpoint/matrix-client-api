@@ -96,7 +96,8 @@ describe('Sync-Gated Content after Join', function () {
       let registeredRoom = null
 
       const fakeCrypto = {
-        setRoomEncryption: async (rid) => { registeredRoom = rid }
+        isEnabled: true,
+        registerRoom: async (rid) => { registeredRoom = rid }
       }
 
       const project = new Project({
@@ -112,7 +113,7 @@ describe('Sync-Gated Content after Join', function () {
         }),
         timelineAPI: createTimelineAPI(),
         commandAPI: createCommandAPI(),
-        cryptoManager: fakeCrypto
+        crypto: fakeCrypto
       })
 
       await project.joinLayer(roomId)
@@ -126,7 +127,8 @@ describe('Sync-Gated Content after Join', function () {
       let registeredRoom = null
 
       const fakeCrypto = {
-        setRoomEncryption: async (rid) => { registeredRoom = rid }
+        isEnabled: true,
+        registerRoom: async (rid) => { registeredRoom = rid }
       }
 
       const project = new Project({
@@ -141,7 +143,7 @@ describe('Sync-Gated Content after Join', function () {
         }),
         timelineAPI: createTimelineAPI(),
         commandAPI: createCommandAPI(),
-        cryptoManager: fakeCrypto
+        crypto: fakeCrypto
       })
 
       await project.joinLayer(roomId)

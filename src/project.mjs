@@ -16,15 +16,16 @@ const M_ROOM_MEMBER = 'm.room.member'
 const MAX_MESSAGE_SIZE = 56 * 1024
 
 /**
- * 
+ *
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager }) {
+const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {} }) {
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
-  this.cryptoManager = cryptoManager || null
+  this.memberCache = memberCache
+  this.crypto = crypto
 
   this.idMapping = new Map()
   this.idMapping.remember = function (upstream, downstream) {
@@ -41,7 +42,7 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager
 }
 
 /**
- * @description 
+ * @description
  * @typedef {Object} ProjectStructure
  * @property {string} id - project id
  * @property {string} name - project name
@@ -56,11 +57,11 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, cryptoManager
 /**
  * @description Retrieves the project hierarchy from the Matrix server and fills the
  * wellKnown mapping between ODIN and Matrix IDs.
- * @param {*} param0 
+ * @param {*} param0
  * @returns {ProjectStructure}
  */
 Project.prototype.hydrate = async function ({ id, upstreamId }) {
-  
+
   const hierarchy = await this.structureAPI.project(upstreamId)
   if (!hierarchy) return
 
@@ -71,19 +72,21 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
   Object.values(hierarchy.layers).forEach(layer => {
     this.idMapping.remember(layer.room_id, layer.id)
   })
-  // Register encrypted rooms with the CryptoManager
-  if (this.cryptoManager) {
+  // Register encrypted rooms
+  if (this.crypto.isEnabled) {
     const allRooms = { ...hierarchy.layers }
     for (const [roomId, room] of Object.entries(allRooms)) {
       if (room.encryption) {
-        await this.cryptoManager.setRoomEncryption(roomId, room.encryption)
+        await this.crypto.registerRoom(roomId)
       }
     }
     // Also check the space itself
     if (hierarchy.encryption) {
-      await this.cryptoManager.setRoomEncryption(upstreamId, hierarchy.encryption)
+      await this.crypto.registerRoom(upstreamId)
     }
   }
+
+
 
   const projectStructure = {
     id,
@@ -101,7 +104,7 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
         self: layer.powerlevel.self.name,
         default: layer.powerlevel.default.name
       },
-      topic: layer.topic      
+      topic: layer.topic
     })),
     invitations: hierarchy.candidates.map(candidate => ({
       id: Base64.encodeURI(candidate.id),
@@ -109,7 +112,7 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
       topic: candidate.topic
     }))
   }
-  
+
   return projectStructure
 }
 
@@ -119,7 +122,7 @@ Project.prototype.shareLayer = async function (layerId, name, description, optio
     return
   }
   const layer = await this.structureAPI.createLayer(layerId, name, description, undefined, options)
-  
+
   await this.structureAPI.addLayerToProject(this.idMapping.get(this.projectId), layer.globalId)
   this.idMapping.remember(layerId, layer.globalId)
 
@@ -134,16 +137,16 @@ Project.prototype.shareLayer = async function (layerId, name, description, optio
 }
 
 Project.prototype.joinLayer = async function (layerId) {
-  
+
   const upstreamId = this.idMapping.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
-  
+
   await this.structureAPI.join(upstreamId)
-  const room = await this.structureAPI.getLayer(upstreamId)  
+  const room = await this.structureAPI.getLayer(upstreamId)
   this.idMapping.remember(room.id, room.room_id)
 
   // Register encryption if applicable (needed before content can be decrypted)
-  if (this.cryptoManager && room.encryption) {
-    await this.cryptoManager.setRoomEncryption(room.room_id, room.encryption)
+  if (this.crypto.isEnabled && room.encryption) {
+    await this.crypto.registerRoom(room.room_id)
   }
 
   // Mark for sync-gated content fetch: content will be loaded once the room
@@ -171,67 +174,18 @@ Project.prototype.joinLayer = async function (layerId) {
  * @param {string} layerId - the local layer id
  */
 Project.prototype.shareHistoricalKeys = function (layerId) {
-  if (!this.cryptoManager) return
+  if (!this.crypto.isEnabled) return
   const roomId = this.idMapping.get(layerId)
   if (!roomId) return
   this.commandAPI.schedule([async () => {
-    await this._shareHistoricalKeysWithProjectMembers(roomId)
-  }])
-}
-
-/**
- * @private
- */
-Project.prototype._shareHistoricalKeysWithProjectMembers = async function (roomId, targetUserIds) {
-  if (!this.cryptoManager) return
-  const log = getLogger()
-  const myUserId = this.timelineAPI.credentials().user_id
-
-  try {
-    // If no specific targets, get all project members
-    let userIds = targetUserIds
-    if (!userIds) {
-      const projectRoomId = this.idMapping.get(this.projectId)
-      const members = await this.commandAPI.httpAPI.members(projectRoomId)
-      userIds = (members.chunk || [])
-        .filter(e => e.content?.membership === 'join')
-        .map(e => e.state_key)
-        .filter(id => id !== myUserId)
-    }
+    const myUserId = this.timelineAPI.credentials().user_id
+    const projectRoomId = this.idMapping.get(this.projectId)
+    const allMembers = await this.memberCache.getMembers(projectRoomId)
+    const userIds = allMembers.filter(id => id !== myUserId)
 
     if (userIds.length === 0) return
-
-    for (const userId of userIds) {
-      try {
-        // Ensure we have the user's device keys
-        await this.cryptoManager.updateTrackedUsers([userId])
-        const keysQueryRequest = await this.cryptoManager.queryKeysForUsers([userId])
-        if (keysQueryRequest) {
-          const queryResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(keysQueryRequest)
-          await this.cryptoManager.markRequestAsSent(keysQueryRequest.id, keysQueryRequest.type, queryResponse)
-        }
-
-        // Establish Olm sessions if needed
-        const claimRequest = await this.cryptoManager.getMissingSessions([userId])
-        if (claimRequest) {
-          const claimResponse = await this.commandAPI.httpAPI.sendOutgoingCryptoRequest(claimRequest)
-          await this.cryptoManager.markRequestAsSent(claimRequest.id, claimRequest.type, claimResponse)
-        }
-
-        // Export and share historical keys
-        const { toDeviceMessages, keyCount } = await this.cryptoManager.shareHistoricalRoomKeys(roomId, userId)
-        if (keyCount > 0) {
-          const txnId = `odin_keyshare_${Date.now()}_${Math.random().toString(36).slice(2)}`
-          await this.commandAPI.httpAPI.sendToDevice('m.room.encrypted', txnId, toDeviceMessages)
-          log.info(`Shared ${keyCount} historical keys with ${userId} for room ${roomId}`)
-        }
-      } catch (err) {
-        log.warn(`Failed to share historical keys with ${userId}: ${err.message}`)
-      }
-    }
-  } catch (err) {
-    log.warn(`Failed to share historical keys for room ${roomId}: ${err.message}`)
-  }
+    await this.crypto.shareHistoricalKeys(roomId, userIds)
+  }])
 }
 
 Project.prototype.leaveLayer = async function (layerId) {
@@ -239,6 +193,7 @@ Project.prototype.leaveLayer = async function (layerId) {
   const layer = await this.structureAPI.getLayer(upstreamId)
 
   await this.structureAPI.leave(upstreamId)
+  this.memberCache.remove(upstreamId)
   this.idMapping.forget(layerId)
   this.idMapping.forget(upstreamId)
 
@@ -264,9 +219,9 @@ Project.prototype.setDefaultRole = async function (layerId, role) {
 Project.prototype.roles = Object.fromEntries(Object.keys(power.ROLES.LAYER).map(k =>[k, k]))
 
 Project.prototype.content = async function (layerId) {
-  const filter = { 
+  const filter = {
       lazy_load_members: true, // improve performance
-      limit: 1000, 
+      limit: 1000,
       types: [ODINv2_MESSAGE_TYPE]
       // No not_senders filter: on (re-)join we need ALL events
       // including our own to reconstruct the full layer state.
@@ -275,7 +230,7 @@ Project.prototype.content = async function (layerId) {
   const upstreamId = this.idMapping.get(layerId)
   const content = await this.timelineAPI.content(upstreamId, filter)
   const operations = content.events
-    .map(event => 
+    .map(event =>
       JSON.parse(Base64.decode(event.content.content))
     )
     .flat()
@@ -296,7 +251,7 @@ Project.prototype.__post = async function (layerId, operations, messageType) {
     const right = split(ops.slice(half))
     return [left, right]
   }
-  
+
   const collect = splittedOperations => {
     if (Array.isArray(splittedOperations[0]) === false) return [splittedOperations]
     return [...collect(splittedOperations[0]), ...collect(splittedOperations[1])]
@@ -319,7 +274,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       Within a project we are only interested in
         * a new layer has been added to the project >> m.space.child
         * an existing layer has been renamed >> m.room.name
-        * a payload message has been posted in the layer >> io.syncpoint.odin.operation  
+        * a payload message has been posted in the layer >> io.syncpoint.odin.operation
     */
     const EVENT_TYPES = [
       M_ROOM_NAME,
@@ -329,15 +284,15 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       ODINv2_MESSAGE_TYPE
     ]
 
-    const filter = { 
+    const filter = {
       account_data: {
         not_types:  [ '*' ]
       },
       room: {
-        timeline: { 
+        timeline: {
           lazy_load_members: true, // improve performance
-          limit: 1000, 
-          types: EVENT_TYPES, 
+          limit: 1000,
+          types: EVENT_TYPES,
           not_senders: [ this.timelineAPI.credentials().user_id ], // NO events if the current user is the sender
           rooms: Array.from(this.idMapping.keys()).filter(key => key.startsWith('!'))
         },
@@ -346,7 +301,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
         }
       }
     }
-    
+
     return filter
   }
 
@@ -361,13 +316,13 @@ Project.prototype.start = async function (streamToken, handler = {}) {
   const streamHandler = wrap(handler)
   this.stream = this.timelineAPI.stream(streamToken, filterProvider)
   for await (const chunk of this.stream) {
- 
+
     if (chunk instanceof Error) {
       await streamHandler.error(chunk)
       continue
     }
 
-    /* 
+    /*
       Just store the next batch value no matter if we will process the stream any further.
       If any of the following functions runs into an error the erroneous chunk
       will get skipped during the next streamToken updated.
@@ -398,7 +353,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
 
     Object.entries(chunk.events).forEach(async ([roomId, content]) => {
       if (isChildAdded(content)) {
-        /* 
+        /*
           If a chunk for a room contains a m.space.child event
           we need to request the details for each child.
           m.space.child can only be received for the project (space) itself
@@ -410,14 +365,14 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           getLogger().warn('Received m.space.child but child room not found')
           return
         }
-        
+
         await streamHandler.invited({
           id: Base64.encodeURI(childRoom.id),
           name: childRoom.name,
           topic: childRoom.topic
         })
-      } 
-      
+      }
+
       if (isLayerRenamed(content)) {
         const renamed = content
           .filter(event => event.type === M_ROOM_NAME)
@@ -427,9 +382,9 @@ Project.prototype.start = async function (streamToken, handler = {}) {
               name: event.content.name
             }
           ))
-        
-        await streamHandler.renamed(renamed)  
-      } 
+
+        await streamHandler.renamed(renamed)
+      }
 
       if (isPowerlevelChanged(content)) {
         const role = content
@@ -440,9 +395,9 @@ Project.prototype.start = async function (streamToken, handler = {}) {
               id: this.idMapping.get(roomId),
               role: {
                 self: powerlevel.self.name,
-                default: powerlevel.default.name 
+                default: powerlevel.default.name
               }
-            }           
+            }
           })
         await streamHandler.roleChanged(role)
       }
@@ -455,21 +410,28 @@ Project.prototype.start = async function (streamToken, handler = {}) {
             membership: event.content.membership,
             subject: event.state_key
           }))
+
+        for (const change of membership) {
+          if (change.membership === 'join') {
+            this.memberCache.addMember(roomId, change.subject)
+          } else if (change.membership === 'leave' || change.membership === 'ban') {
+            this.memberCache.removeMember(roomId, change.subject)
+          }
+        }
+
         await streamHandler.membershipChanged(membership)
 
         // Safety net: share historical keys with newly joined members.
         // Primary key sharing happens at share/invite time (see shareLayer),
         // but this catches keys created between share and join.
-        if (this.cryptoManager) {
+        if (this.crypto.isEnabled) {
           const myUserId = this.timelineAPI.credentials().user_id
-          const newJoinUserIds = content
-            .filter(event => event.type === M_ROOM_MEMBER)
-            .filter(event => event.content.membership === 'join')
-            .filter(event => event.state_key !== myUserId)
-            .map(event => event.state_key)
+          const newJoinUserIds = membership
+            .filter(m => m.membership === 'join' && m.subject !== myUserId)
+            .map(m => m.subject)
 
           if (newJoinUserIds.length > 0) {
-            await this._shareHistoricalKeysWithProjectMembers(roomId, newJoinUserIds)
+            await this.crypto.shareHistoricalKeys(roomId, newJoinUserIds)
           }
         }
       }
@@ -479,13 +441,13 @@ Project.prototype.start = async function (streamToken, handler = {}) {
           .filter(event => event.type === ODINv2_MESSAGE_TYPE)
           .map(event => JSON.parse(Base64.decode(event.content.content)))
           .flat()
-  
+
         await streamHandler.received({
           id: this.idMapping.get(roomId),
           operations
         }
         )
-      }     
+      }
     })
   }
 

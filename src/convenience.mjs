@@ -1,4 +1,3 @@
-import { powerlevel } from "./powerlevel.mjs"
 import { getLogger } from './logger.mjs'
 
 const effectiveFilter = filter => {
