@@ -64,7 +64,7 @@ TimelineAPI.prototype.credentials = function () {
   return this.httpApi.credentials
 }
 
-TimelineAPI.prototype.content = async function (roomId, filter, from) {
+TimelineAPI.prototype.content = async function (roomId, filter, _from) {
   getLogger().debug('Timeline content filter:', JSON.stringify(filter))
 
   // Augment the filter for crypto: add m.room.encrypted to types

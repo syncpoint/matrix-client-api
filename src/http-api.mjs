@@ -12,10 +12,11 @@ const RETRY_LIMIT = 2
  * @readonly
  * @enum {string}
  */
-const Direction = {
+/* const Direction = {
   backward: 'b',
   forward: 'f'
-}
+} */
+// dead 
 function HttpAPI (credentials) {
 
   this.credentials = {
