@@ -370,7 +370,7 @@ HttpAPI.prototype.sendToDevice = async function (eventType, txnId = randomUUID()
   }).json()
 }
 
-HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT) {
+HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT, signal) {
   const buildSearchParams = (since, filter, timeout) => {
     const params = {
       timeout
@@ -380,9 +380,9 @@ HttpAPI.prototype.sync = async function (since, filter, timeout = POLL_TIMEOUT) 
     if (f) params.filter = f
     return params
   }
-  return this.client.get('v3/sync', {
-    searchParams: buildSearchParams(since, filter, timeout)
-  }).json()
+  const options = { searchParams: buildSearchParams(since, filter, timeout) }
+  if (signal) options.signal = signal
+  return this.client.get('v3/sync', options).json()
 }
 
 /**

@@ -97,7 +97,7 @@ TimelineAPI.prototype.content = async function (roomId, filter, _from) {
 }
 
 
-TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) {
+TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, signal) {
   /*
     We want the complete timeline for all rooms that we have already joined. Thus we get the most recent
     events and then iterate over partial results until we filled the gap. The order of the events shall be
@@ -117,7 +117,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   // for catching up
   const jobs = {}
 
-  const syncResult = await this.httpApi.sync(since, effectiveFilter, timeout)
+  const syncResult = await this.httpApi.sync(since, effectiveFilter, timeout, signal)
 
   // Feed crypto state from sync response
   if (this.onSyncResponse) {
@@ -263,26 +263,55 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 }
 
 
+/**
+ * Abort the current long-poll sync request so that the stream restarts
+ * immediately with an updated filter (e.g. after joinLayer added a room
+ * to idMapping). The stream loop catches the abort and re-enters the
+ * next iteration without incrementing the retry counter.
+ */
+TimelineAPI.prototype.restartSync = function () {
+  if (this._syncAbort) {
+    this._syncAbort.abort()
+    this._syncAbort = null
+  }
+}
+
 TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = (new AbortController()).signal) {
-
-
 
   let streamToken = since
   let retryCounter = 0
 
   while (!signal.aborted) {
+    // Each iteration gets its own AbortController so that restartSync()
+    // can cancel the current long-poll without stopping the stream.
+    const iterationAbort = new AbortController()
+    this._syncAbort = iterationAbort
+
+    // Forward the outer lifecycle signal: if the stream is stopped,
+    // also abort the current request.
+    const onOuterAbort = () => iterationAbort.abort()
+    signal.addEventListener('abort', onOuterAbort, { once: true })
+
     try {
       await chill(retryCounter)
       const filter = filterProvider ? filterProvider() : undefined
-      const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
+      const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, iterationAbort.signal)
       retryCounter = 0
       if (streamToken !== syncResult.next_batch) {
         streamToken = syncResult.next_batch
         yield syncResult
       }
     } catch (error) {
+      if (iterationAbort.signal.aborted && !signal.aborted) {
+        // restartSync() was called — not an error, just restart immediately
+        getLogger().debug('Sync restarted (filter update)')
+        continue
+      }
       retryCounter++
       yield new Error(error)
+    } finally {
+      signal.removeEventListener('abort', onOuterAbort)
+      this._syncAbort = null
     }
   }
 }

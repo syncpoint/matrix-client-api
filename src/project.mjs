@@ -140,18 +140,29 @@ Project.prototype.joinLayer = async function (layerId) {
 
   const upstreamId = this.idMapping.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
 
+  // 1. Add the upstream (Matrix) room ID to the filter BEFORE joining
+  //    so the next sync poll includes it.
+  this.idMapping.remember(upstreamId, upstreamId)
+  this.pendingContent.add(upstreamId)
+
+  // 2. Restart the sync long-poll so it picks up the updated rooms filter
+  //    immediately. The restarted poll will be waiting when the join event
+  //    arrives on the server.
+  this.timelineAPI.restartSync()
+
+  // 3. NOW perform the actual join — the sync poll already includes this room.
   await this.structureAPI.join(upstreamId)
   const room = await this.structureAPI.getLayer(upstreamId)
+
+  // 4. Replace the temporary self-mapping with the real ODIN↔Matrix mapping.
+  //    room.room_id === upstreamId, so pendingContent stays valid.
+  this.idMapping.forget(upstreamId)
   this.idMapping.remember(room.id, room.room_id)
 
   // Register encryption if applicable (needed before content can be decrypted)
   if (this.crypto.isEnabled && room.encryption) {
     await this.crypto.registerRoom(room.room_id)
   }
-
-  // Mark for sync-gated content fetch: content will be loaded once the room
-  // appears in a sync response, not immediately after join.
-  this.pendingContent.add(room.room_id)
 
   const layer = {...room}
   layer.role = {
