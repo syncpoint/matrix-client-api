@@ -181,8 +181,8 @@ describe('E2EE Integration (Tuwunel)', function () {
     })
 
     // Register room encryption with both crypto managers
-    await aliceCrypto.setRoomEncryption(room.room_id, { algorithm: 'm.megolm.v1.aes-sha2' })
-    await bobCrypto.setRoomEncryption(room.room_id, { algorithm: 'm.megolm.v1.aes-sha2' })
+    await aliceCrypto.setRoomEncryption(room.room_id)
+    await bobCrypto.setRoomEncryption(room.room_id)
 
     // Sync both sides to pick up device lists
     await syncAndProcess(aliceCrypto, alice.accessToken)

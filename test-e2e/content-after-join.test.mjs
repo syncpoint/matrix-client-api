@@ -192,7 +192,7 @@ describe('Content after Join', function () {
     console.log('Layer added to project')
 
     // Register encryption
-    await alice.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
+    await alice.crypto.setRoomEncryption(layer.globalId)
 
     // === Step 3: Initial sync for both (device discovery) ===
     console.log('\n--- Step 3: Sync both sides ---')
@@ -260,7 +260,7 @@ describe('Content after Join', function () {
     console.log('Bob synced and processed to_device events')
 
     // Register encryption for Bob
-    await bob.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
+    await bob.crypto.setRoomEncryption(layer.globalId)
 
     // === Step 7: Bob joins the layer and loads content ===
     console.log('\n--- Step 7: Bob joins layer and loads content ---')

@@ -302,7 +302,7 @@ describe('Sync-Gated Content (E2E)', function () {
       )
       layerRoomId = layer.globalId
       await alice.structureAPI.addLayerToProject(project.globalId, layerRoomId)
-      await aliceCrypto.setRoomEncryption(layerRoomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await aliceCrypto.setRoomEncryption(layerRoomId)
 
       // Sync both sides for device discovery
       await doSync(alice.httpAPI, aliceCrypto, undefined, 0)
@@ -335,7 +335,7 @@ describe('Sync-Gated Content (E2E)', function () {
       // Bob syncs to receive historical keys (before joining the layer)
       const bSync = await doSync(bob.httpAPI, bobCrypto, undefined, 0)
       bobSyncToken = bSync.next_batch
-      await bobCrypto.setRoomEncryption(layerRoomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await bobCrypto.setRoomEncryption(layerRoomId)
     })
 
     it('sync-gated content() decrypts all events after join', async function () {

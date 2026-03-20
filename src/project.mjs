@@ -77,12 +77,12 @@ Project.prototype.hydrate = async function ({ id, upstreamId }) {
     const allRooms = { ...hierarchy.layers }
     for (const [roomId, room] of Object.entries(allRooms)) {
       if (room.encryption) {
-        await this.crypto.registerRoom(roomId, room.encryption)
+        await this.crypto.registerRoom(roomId)
       }
     }
     // Also check the space itself
     if (hierarchy.encryption) {
-      await this.crypto.registerRoom(upstreamId, hierarchy.encryption)
+      await this.crypto.registerRoom(upstreamId)
     }
   }
 
@@ -146,7 +146,7 @@ Project.prototype.joinLayer = async function (layerId) {
 
   // Register encryption if applicable (needed before content can be decrypted)
   if (this.crypto.isEnabled && room.encryption) {
-    await this.crypto.registerRoom(room.room_id, room.encryption)
+    await this.crypto.registerRoom(room.room_id)
   }
 
   // Mark for sync-gated content fetch: content will be loaded once the room

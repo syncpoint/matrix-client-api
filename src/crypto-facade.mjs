@@ -84,10 +84,9 @@ class CryptoFacade {
    * Register a room as encrypted with the OlmMachine.
    *
    * @param {string} roomId
-   * @param {Object} [encryptionContent] - Content of the m.room.encryption state event
    */
-  async registerRoom (roomId, encryptionContent) {
-    await this.cryptoManager.setRoomEncryption(roomId, encryptionContent)
+  async registerRoom (roomId) {
+    await this.cryptoManager.setRoomEncryption(roomId)
   }
 
   /**

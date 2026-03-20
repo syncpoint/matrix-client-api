@@ -123,7 +123,7 @@ describe('Room Encryption Registration', function () {
   it('should register a room for encryption without error', async () => {
     const crypto = new CryptoManager()
     await crypto.initialize('@alice:test', 'DEVICE_A')
-    await crypto.setRoomEncryption('!room:test', { algorithm: 'm.megolm.v1.aes-sha2' })
+    await crypto.setRoomEncryption('!room:test')
     // No error means success
   })
 
@@ -139,7 +139,7 @@ describe('Room Encryption Registration', function () {
       }
     }
 
-    await crypto.setRoomEncryption('!room:test', { algorithm: 'm.megolm.v1.aes-sha2' })
+    await crypto.setRoomEncryption('!room:test')
     await crypto.updateTrackedUsers(['@alice:test'])
 
     // After room registration, shareRoomKey should be callable
@@ -264,7 +264,7 @@ describe('Encrypt / Decrypt Round-Trip (self)', function () {
       }
     }
 
-    await alice.setRoomEncryption('!room:test', { algorithm: 'm.megolm.v1.aes-sha2' })
+    await alice.setRoomEncryption('!room:test')
     await alice.updateTrackedUsers(['@alice:test'])
 
     // Query own keys

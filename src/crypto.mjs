@@ -237,9 +237,8 @@ class CryptoManager {
    * Register a room as encrypted with the OlmMachine.
    * Must be called when a room with m.room.encryption state is discovered.
    * @param {string} roomId
-   * @param {Object} [encryptionContent] - Content of the m.room.encryption state event
    */
-  async setRoomEncryption (roomId, encryptionContent = {}) {
+  async setRoomEncryption (roomId) {
     if (!this.olmMachine) throw new Error(NOT_INITIALIZED)
     const log = getLogger()
     const settings = new RoomSettings(EncryptionAlgorithm.MegolmV1AesSha2, false, false)

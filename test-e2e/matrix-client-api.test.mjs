@@ -248,8 +248,8 @@ describe('matrix-client-api E2EE Integration', function () {
       await bob.httpAPI.join(roomId)
 
       // Register encryption with both CryptoManagers
-      await alice.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await alice.crypto.setRoomEncryption(roomId)
+      await bob.crypto.setRoomEncryption(roomId)
 
       // Initial sync for both to discover device lists
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
@@ -314,8 +314,8 @@ describe('matrix-client-api E2EE Integration', function () {
       await alice.httpAPI.invite(roomId, bobCreds.user_id)
       await bob.httpAPI.join(roomId)
 
-      await alice.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(roomId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await alice.crypto.setRoomEncryption(roomId)
+      await bob.crypto.setRoomEncryption(roomId)
 
       // Initial sync for both
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
@@ -382,8 +382,8 @@ describe('matrix-client-api E2EE Integration', function () {
       await bob.httpAPI.join(layer.globalId)
 
       // 3. Register encryption
-      await alice.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
-      await bob.crypto.setRoomEncryption(layer.globalId, { algorithm: 'm.megolm.v1.aes-sha2' })
+      await alice.crypto.setRoomEncryption(layer.globalId)
+      await bob.crypto.setRoomEncryption(layer.globalId)
 
       // 4. Initial sync both
       const aSync = await alice.httpAPI.sync(undefined, undefined, 0)
