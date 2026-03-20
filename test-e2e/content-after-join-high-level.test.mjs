@@ -104,24 +104,8 @@ async function buildStack (credentials) {
   }
 }
 
-function waitForCommandQueue (commandAPI, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs
-    const check = () => {
-      if (commandAPI.scheduledCalls.isBlocked()) {
-        setTimeout(resolve, 500)
-      } else if (Date.now() > deadline) {
-        reject(new Error('CommandAPI queue did not drain in time'))
-      } else {
-        setTimeout(check, 100)
-      }
-    }
-    setTimeout(check, 100)
-  })
-}
-
 describe('Content after Join', function () {
-  this.timeout(60000)
+  this.timeout(30000)
 
   let aliceCreds, bobCreds
   let alice, bob
@@ -165,62 +149,57 @@ describe('Content after Join', function () {
     if (bob?.crypto) await bob.crypto.close()
   })
 
-  it('Alice creates and shares a project with bob, creates a shared layer and posts some content', async function() {
-    
+  it('Bob joins after Alice creates and populates the project, and loads layer content', async function() {
 
+    // --- Alice: create project, share layer, post content, invite Bob ---
     const projectDescriptor = await alice.projectList.share(projectId, 'Who the fuck is Alice', 'TEST')
     await alice.project.hydrate({ id: projectDescriptor.id, upstreamId: projectDescriptor.upstreamId })
 
     const layerStructure = await alice.project.shareLayer(layerId, 'Who needs a name', 'TEST')
 
-    
     await alice.project.post(layerStructure.id, first)
     await alice.project.post(layerStructure.id, second)
 
     await alice.projectList.invite(projectId, bob.userId)
-  })
 
-  it('Bob receives a project invitation, accepts it, joins all layers and loads the layer content', async function() {
-
-    const controller = new AbortController()
-    Object.defineProperty(controller.signal, 'id', { value: 'mocha-test', writable: false, enumerable: true })
-
-    let resolver
-    const handlerPromise = new Promise((resolve) => {
+    // --- Bob: start sync stream, receive invitation, join, load content ---
+    let resolver, rejecter
+    const handlerPromise = new Promise((resolve, reject) => {
       resolver = resolve
+      rejecter = reject
     })
 
     const projectListHandler = {
       error: async function (error) {
-        console.error(error)
-      },
-      streamToken: async function (token) {
-        // ignored
+        rejecter(error)
       },
       invited: async function(project) {
-        const projectDescriptor = await bob.projectList.join(project.id)
-
-        const projectStructure = await bob.project.hydrate({ id: projectDescriptor.id, upstreamId: projectDescriptor.upstreamId })
-      
-        const promisesToJoinLayer = projectStructure.invitations.map(invitation => {
-          const p = bob.project.joinLayer(invitation.id)
-          return p
-        })
-        await Promise.all(promisesToJoinLayer)
-
-        const operations = await bob.project.content(layerId)
-        resolver(operations)
+        // Stop the sync stream first so the long-poll doesn't block test termination.
+        // The forEach in ProjectList.start() is fire-and-forget, so the for-await loop
+        // has already moved on to the next syncTimeline() call (30s long poll).
+        // We must stop before doing any further async work.
+        await bob.projectList.stop()
+        resolver(project)
       }
     }
 
     bob.projectList.start(null, projectListHandler)
 
-    const operations = await handlerPromise
+    const invitation = await handlerPromise
+
+    // Now do the actual join/hydrate/content outside the sync stream
+    const bobProjectDescriptor = await bob.projectList.join(invitation.id)
+    const projectStructure = await bob.project.hydrate({ id: bobProjectDescriptor.id, upstreamId: bobProjectDescriptor.upstreamId })
+
+    const promisesToJoinLayer = projectStructure.invitations.map(invitation => {
+      return bob.project.joinLayer(invitation.id)
+    })
+    await Promise.all(promisesToJoinLayer)
+
+    const operations = await bob.project.content(layerId)
 
     assert.equal(operations.length, 2, `Bob should have received 2 operations`)
     assert.deepStrictEqual(operations, expectedOperations, 'Operations received by Bob are not equal to the ones Alice sent')
-
-    await bob.projectList.stop()
   })
 
 
