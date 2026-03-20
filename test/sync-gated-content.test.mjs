@@ -50,6 +50,8 @@ const createTimelineAPI = ({ syncChunks = [], contentResult = { events: [] }, cr
       }
     },
 
+    restartSync: () => {},
+
     // For assertions
     _contentCallCount: 0,
     _lastContentFilter: null,
