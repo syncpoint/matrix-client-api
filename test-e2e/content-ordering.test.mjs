@@ -1,18 +1,15 @@
 /**
- * Test: Bob can load layer content after joining an encrypted room.
+ * Test: Operations loaded via content() must be in chronological order (oldest first).
  *
- * This reproduces the exact ODIN flow:
- *   1. Alice creates an encrypted project + layer
- *   2. Alice posts content (ODIN operations) to the layer
- *   3. Alice shares historical keys with project members
- *   4. Bob joins the layer
- *   5. Bob calls content() to load all existing operations
+ * ODIN applies operations sequentially — if the order is wrong, the resulting
+ * layer state is corrupted. This test verifies that content() returns operations
+ * in the exact order they were posted, across multiple posts.
  *
  * Prerequisites:
  *   cd test-e2e && docker compose up -d
  *
  * Run:
- *   npm run test:e2e -- --grep "Content after Join"
+ *   npm run test:e2e -- --grep "Content Ordering"
  */
 
 import { describe, it, before, after } from 'mocha'
@@ -32,16 +29,9 @@ import levelup from 'levelup'
 import memdown from 'memdown'
 import subleveldown from 'subleveldown'
 
-const createDB = () => {
-  const db = levelup(memdown())
-  const s = subleveldown(db, 'command-queue', { valueEncoding: 'json' })
-  return s
-}
-
 const HOMESERVER_URL = process.env.HOMESERVER_URL || 'http://localhost:8008'
 const suffix = Date.now().toString(36)
 
-// Enable debug logging with E2E_DEBUG=1
 if (!process.env.E2E_DEBUG) {
   setLogger({
     info: (...args) => console.log('[INFO]', ...args),
@@ -76,17 +66,17 @@ async function registerUser (username, deviceId) {
     access_token: data.access_token,
     device_id: data.device_id,
     home_server: 'odin.battlespace',
-    home_server_url: HOMESERVER_URL,
-    password: `pass_${username}`
+    home_server_url: HOMESERVER_URL
   }
 }
 
 async function buildStack (credentials) {
   const httpAPI = new HttpAPI(credentials)
-
-
   const structureAPI = new StructureAPI(httpAPI)
-  const db = createDB()
+  const db = (() => {
+    const d = levelup(memdown())
+    return subleveldown(d, 'command-queue', { valueEncoding: 'json' })
+  })()
   const memberCache = new RoomMemberCache(async (roomId) => {
     const members = await httpAPI.members(roomId)
     return (members.chunk || [])
@@ -104,39 +94,42 @@ async function buildStack (credentials) {
   }
 }
 
-function waitForCommandQueue (commandAPI, timeoutMs = 10000) {
+/**
+ * Wait until the CommandAPI queue has drained (all scheduled calls sent).
+ * isBlocked() means the run-loop is waiting for new entries — i.e. the queue is empty.
+ */
+function waitForQueueDrain (project, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs
     const check = () => {
-      if (commandAPI.scheduledCalls.isBlocked()) {
-        setTimeout(resolve, 500)
+      if (project.commandAPI.scheduledCalls.isBlocked()) {
+        setTimeout(resolve, 200)  // small grace period
       } else if (Date.now() > deadline) {
         reject(new Error('CommandAPI queue did not drain in time'))
       } else {
         setTimeout(check, 100)
       }
     }
-    setTimeout(check, 100)
+    setTimeout(check, 200)
   })
 }
 
-describe('Content after Join', function () {
-  this.timeout(60000)
+describe('Content Ordering', function () {
+  this.timeout(30000)
 
-  let aliceCreds, bobCreds
   let alice, bob
-
   let projectId, layerId
 
-  const first = [
-    { type: 'put', key: 'feature:1', value: { name: 'Tank', sidc: 'SFGPUCA---' } }
+  // Five operations posted individually — order matters
+  const operations = [
+    [{ type: 'put', key: 'feature:1', value: { name: 'Alpha', seq: 1 } }],
+    [{ type: 'put', key: 'feature:2', value: { name: 'Bravo', seq: 2 } }],
+    [{ type: 'put', key: 'feature:3', value: { name: 'Charlie', seq: 3 } }],
+    [{ type: 'put', key: 'feature:1', value: { name: 'Alpha-updated', seq: 4 } }],
+    [{ type: 'del', key: 'feature:2', seq: 5 }]
   ]
 
-  const second = [
-    { type: 'put', key: 'feature:2', value: { name: 'HQ', sidc: 'SFGPUH----' } }
-  ]
-
-  const expectedOperations = [...first, ...second]
+  const expectedFlat = operations.flat()
 
   before(async function () {
     try {
@@ -147,82 +140,67 @@ describe('Content after Join', function () {
       this.skip()
     }
 
-    aliceCreds = await registerUser(`alice_${suffix}`, `ALICE_${suffix}`)
-    bobCreds = await registerUser(`bob_${suffix}`, `BOB_${suffix}`)
-
+    const aliceCreds = await registerUser(`alice_ord_${suffix}`, `ALICE_ORD_${suffix}`)
+    const bobCreds = await registerUser(`bob_ord_${suffix}`, `BOB_ORD_${suffix}`)
     alice = await buildStack(aliceCreds)
     bob = await buildStack(bobCreds)
-
     projectId = `project:${randomUUID()}`
     layerId = `layer:${randomUUID()}`
-
   })
 
   after(async function () {
     if (alice?.projectList) await alice.projectList.stop()
     if (bob?.projectList) await bob.projectList.stop()
-    if (alice?.crypto) await alice.crypto.close()
-    if (bob?.crypto) await bob.crypto.close()
   })
 
-  it('Alice creates and shares a project with bob, creates a shared layer and posts some content', async function() {
-    
+  it('should return operations in chronological order (oldest first)', async function () {
 
-    const projectDescriptor = await alice.projectList.share(projectId, 'Who the fuck is Alice', 'TEST')
+    // --- Alice: create project, share layer, post operations sequentially ---
+    const projectDescriptor = await alice.projectList.share(projectId, 'Ordering Test', 'TEST')
     await alice.project.hydrate({ id: projectDescriptor.id, upstreamId: projectDescriptor.upstreamId })
+    const layerStructure = await alice.project.shareLayer(layerId, 'Ordered Layer', 'TEST')
 
-    const layerStructure = await alice.project.shareLayer(layerId, 'Who needs a name', 'TEST')
-
-    
-    await alice.project.post(layerStructure.id, first)
-    await alice.project.post(layerStructure.id, second)
-
-    await alice.projectList.invite(projectId, bob.userId)
-  })
-
-  it('Bob receives a project invitation, accepts it, joins all layers and loads the layer content', async function() {
-
-    const controller = new AbortController()
-    Object.defineProperty(controller.signal, 'id', { value: 'mocha-test', writable: false, enumerable: true })
-
-    let resolver
-    const handlerPromise = new Promise((resolve) => {
-      resolver = resolve
-    })
-
-    const projectListHandler = {
-      error: async function (error) {
-        console.error(error)
-      },
-      streamToken: async function (token) {
-        // ignored
-      },
-      invited: async function(project) {
-        const projectDescriptor = await bob.projectList.join(project.id)
-
-        const projectStructure = await bob.project.hydrate({ id: projectDescriptor.id, upstreamId: projectDescriptor.upstreamId })
-      
-        const promisesToJoinLayer = projectStructure.invitations.map(invitation => {
-          const p = bob.project.joinLayer(invitation.id)
-          return p
-        })
-        await Promise.all(promisesToJoinLayer)
-
-        const operations = await bob.project.content(layerId)
-        resolver(operations)
-      }
+    // Post each operation individually to ensure separate message events
+    for (const op of operations) {
+      await alice.project.post(layerStructure.id, op)
     }
 
-    bob.projectList.start(null, projectListHandler)
+    // Wait for CommandAPI to actually send all messages
+    await waitForQueueDrain(alice.project)
 
-    const operations = await handlerPromise
+    // --- Alice invites Bob, Bob joins via ProjectList ---
+    await alice.projectList.invite(projectId, bob.userId)
 
-    assert.equal(operations.length, 2, `Bob should have received 2 operations`)
-    assert.deepStrictEqual(operations, expectedOperations, 'Operations received by Bob are not equal to the ones Alice sent')
+    const invitation = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('No invite received')), 15000)
+      bob.projectList.start(null, {
+        error: async (err) => { clearTimeout(timer); reject(err) },
+        invited: async (project) => {
+          clearTimeout(timer)
+          await bob.projectList.stop()
+          resolve(project)
+        }
+      })
+    })
 
-    await bob.projectList.stop()
+    const bobProjectDescriptor = await bob.projectList.join(invitation.id)
+    await bob.project.hydrate({ id: bobProjectDescriptor.id, upstreamId: bobProjectDescriptor.upstreamId })
+
+    const invitations = (await bob.project.hydrate({ id: bobProjectDescriptor.id, upstreamId: bobProjectDescriptor.upstreamId })).invitations
+    for (const inv of invitations) {
+      await bob.project.joinLayer(inv.id)
+    }
+
+    // --- Bob loads content ---
+    const loaded = await bob.project.content(layerId)
+
+    // --- Verify order ---
+    assert.equal(loaded.length, expectedFlat.length,
+      `Expected ${expectedFlat.length} operations, got ${loaded.length}`)
+
+    for (let i = 0; i < expectedFlat.length; i++) {
+      assert.deepStrictEqual(loaded[i], expectedFlat[i],
+        `Operation at index ${i} is out of order.\nExpected: ${JSON.stringify(expectedFlat[i])}\nGot: ${JSON.stringify(loaded[i])}`)
+    }
   })
-
-
-  
 })

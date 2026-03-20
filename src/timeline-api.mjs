@@ -156,11 +156,12 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', effectiveFilter?.room?.timeline))
   )
   /*
-    Since we walk backwards ('b') in time we need to append the events at the head of the array
-    in order to maintain the chronological order (oldest first).
+    catchUp with dir='b' returns events newest → oldest.
+    Reverse to get oldest → newest, then prepend before the sync timeline
+    events so the full array is in chronological order (oldest first).
   */
   catchUp.forEach(result => {
-    events[result.roomId] = [...events[result.roomId], ...result.events]
+    events[result.roomId] = [...result.events.reverse(), ...events[result.roomId]]
   })
 
   // Decrypt encrypted events if crypto is available
@@ -200,11 +201,14 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
 
 TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, currentStreamToken, dir = 'b', filter = {}) {
 
+  const MAX_EMPTY_RETRIES = 4
+  const INITIAL_RETRY_DELAY_MS = 500
+
   const queryOptions = {
     filter,
     dir,
     to: lastKnownStreamToken,
-    limit: 1000
+    limit: 100
   }
 
   // Properties "from" and "limited" will be modified during catchUp-phase
@@ -213,17 +217,41 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
     limited: true
   }
 
-  // The order of events is newest to oldest since we move backwards on the timeline.
+  const log = getLogger()
   let events = []
+  let emptyRetries = 0
 
   while (pagination.limited) {
     const options = {...queryOptions, ...pagination}
 
     const batch = await this.httpApi.getMessages(roomId, options)
-    events = [...events, ...batch.chunk]
-    if (batch.end && batch.end !== pagination.to) {
-      pagination.from = batch.end
+    const hasMore = batch.end && batch.end !== queryOptions.to
+
+    if (batch.chunk.length > 0) {
+      events = [...events, ...batch.chunk]
+      emptyRetries = 0
+
+      if (hasMore) {
+        pagination.from = batch.end
+      } else {
+        pagination.limited = false
+      }
+    } else if (hasMore) {
+      // Empty chunk but the server signals more events exist.
+      // This can happen with federated rooms where the remote server
+      // has not yet delivered its events. Retry with exponential backoff.
+      emptyRetries++
+      if (emptyRetries > MAX_EMPTY_RETRIES) {
+        log.warn(`Pagination for room ${roomId}: ${MAX_EMPTY_RETRIES} consecutive empty responses, stopping`)
+        pagination.limited = false
+      } else {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, emptyRetries - 1)
+        log.debug(`Pagination for room ${roomId}: empty chunk with end token, retry ${emptyRetries}/${MAX_EMPTY_RETRIES} in ${delay}ms`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        // Retry with the same from-token; do NOT advance pagination.from
+      }
     } else {
+      // Empty chunk, no end token — we have reached the end.
       pagination.limited = false
     }
   }
