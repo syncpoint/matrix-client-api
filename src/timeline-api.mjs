@@ -156,11 +156,12 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     Object.entries(jobs).map(([roomId, prev_batch]) => this.catchUp(roomId, syncResult.next_batch, prev_batch, 'b', effectiveFilter?.room?.timeline))
   )
   /*
-    Since we walk backwards ('b') in time we need to append the events at the head of the array
-    in order to maintain the chronological order (oldest first).
+    catchUp with dir='b' returns events newest → oldest.
+    Reverse to get oldest → newest, then prepend before the sync timeline
+    events so the full array is in chronological order (oldest first).
   */
   catchUp.forEach(result => {
-    events[result.roomId] = [...events[result.roomId], ...result.events]
+    events[result.roomId] = [...result.events.reverse(), ...events[result.roomId]]
   })
 
   // Decrypt encrypted events if crypto is available
