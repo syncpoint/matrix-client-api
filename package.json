@@ -4,6 +4,8 @@
   "description": "A minimal client API for [matrix]",
   "main": "index.mjs",
   "scripts": {
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "test": "mocha ./test/*",
     "test:e2e": "mocha --timeout 30000 ./test-e2e/*.test.mjs"
   },
@@ -24,6 +26,7 @@
     "levelup": "^5.1.1",
     "memdown": "^6.1.1",
     "mocha": "^10.2.0",
+    "oxlint": "^1.56.0",
     "subleveldown": "^6.0.1"
   }
 }
