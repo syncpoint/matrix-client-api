@@ -293,10 +293,10 @@ HttpAPI.prototype.members = async function (roomId, exclude = 'leave') {
   return this.client.get(`v3/rooms/${encodeURIComponent(roomId)}/members?not_membership=${exclude}`).json()
 }
 
-HttpAPI.prototype.searchInUserDirectory = async function (term) {
+HttpAPI.prototype.searchInUserDirectory = async function (term, limit = 20) {
   return this.client.post('v3/user_directory/search', {
     json: {
-      limit: 5,
+      limit,
       search_term: term
     }
   }).json()
