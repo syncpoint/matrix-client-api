@@ -38,7 +38,8 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, 
 
   // Rooms waiting for their first sync cycle before content is fetched.
   // joinLayer() adds entries, start() processes them when the room appears in sync.
-  this.pendingContent = new Set()
+  // Maps roomId → { retries: number } to track federation backfill retries.
+  this.pendingContent = new Map()
 }
 
 /**
@@ -143,7 +144,7 @@ Project.prototype.joinLayer = async function (layerId) {
   // 1. Add the upstream (Matrix) room ID to the filter BEFORE joining
   //    so the next sync poll includes it.
   this.idMapping.remember(upstreamId, upstreamId)
-  this.pendingContent.add(upstreamId)
+  this.pendingContent.set(upstreamId, { retries: 0 })
 
   // 2. Restart the sync long-poll and WAIT until the new iteration has
   //    applied the updated rooms filter. This ensures the sync request
@@ -346,20 +347,32 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     // Check both timeline events and state events — the room may appear in sync
     // with only state (e.g. the join event) but no timeline events if the
     // server-side filter excludes the current user's events via not_senders.
-    for (const roomId of this.pendingContent) {
+    //
+    // Federation backfill retry: when /messages returns empty (the remote
+    // server hasn't backfilled yet), keep the room pending and retry on
+    // subsequent sync cycles up to MAX_CONTENT_RETRIES times.
+    const MAX_CONTENT_RETRIES = 10
+    for (const [roomId, state] of this.pendingContent) {
       if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
 
-      this.pendingContent.delete(roomId)
       const log = getLogger()
-      log.info(`Sync-gated content fetch for room ${roomId}`)
+      log.info(`Sync-gated content fetch for room ${roomId} (attempt ${state.retries + 1})`)
 
       const layerId = this.idMapping.get(roomId)
       const operations = await this.content(layerId)
 
-      log.info(`Sync-gated content: ${operations.length} operations for room ${roomId}`)
-
       if (operations.length > 0) {
+        this.pendingContent.delete(roomId)
+        log.info(`Sync-gated content: ${operations.length} operations for room ${roomId}`)
         await streamHandler.received({ id: layerId, operations })
+      } else {
+        state.retries++
+        if (state.retries >= MAX_CONTENT_RETRIES) {
+          this.pendingContent.delete(roomId)
+          log.warn(`Sync-gated content: giving up on room ${roomId} after ${MAX_CONTENT_RETRIES} retries (empty content)`)
+        } else {
+          log.info(`Sync-gated content: empty response for room ${roomId}, will retry (${state.retries}/${MAX_CONTENT_RETRIES})`)
+        }
       }
     }
 
