@@ -460,7 +460,7 @@ describe('Sync-Gated Content after Join', function () {
       const roomId = '!hopeless:remote'
 
       // Generate 11 sync chunks all containing the room
-      const syncChunks = Array.from({ length: 11 }, (_, i) => ({
+      const syncChunks = Array.from({ length: 21 }, (_, i) => ({
         next_batch: `b${i + 2}`,
         events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] },
         stateEvents: {}
@@ -487,7 +487,7 @@ describe('Sync-Gated Content after Join', function () {
         received: async () => { assert.fail('received() should not be called') }
       })
 
-      assert.strictEqual(timelineAPI._contentCallCount, 10, 'Should stop after 10 retries')
+      assert.strictEqual(timelineAPI._contentCallCount, 20, 'Should stop after 20 retries')
       assert.ok(!project.pendingContent.has(roomId), 'Room should be removed after giving up')
     })
   })

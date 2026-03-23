@@ -20,7 +20,7 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const CONTENT_RETRY_INTERVAL_MS = 5000
+const CONTENT_RETRY_INTERVAL_MS = 10000
 
 const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {}, contentRetryIntervalMs } = {}) {
   this.contentRetryIntervalMs = contentRetryIntervalMs ?? CONTENT_RETRY_INTERVAL_MS
@@ -355,7 +355,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     // Federation backfill retry: when /messages returns empty (the remote
     // server hasn't backfilled yet), keep the room pending and retry on
     // subsequent sync cycles up to MAX_CONTENT_RETRIES times.
-    const MAX_CONTENT_RETRIES = 10
+    const MAX_CONTENT_RETRIES = 20
     for (const [roomId, state] of this.pendingContent) {
 
       // On the first attempt, wait for the room to appear in sync.
