@@ -174,4 +174,91 @@ describe('Project Join Content (E2E)', function () {
         `Operation at index ${i} out of order`)
     }
   })
+
+  it('sync-gated received() delivers content after joinLayer() restarts sync', async function () {
+    // Fresh users for a clean sync state
+    const alice2Creds = await registerUser(`alice2_pjc_${suffix}`)
+    const bob2Creds = await registerUser(`bob2_pjc_${suffix}`)
+    const alice2Client = MatrixClient({ ...alice2Creds, db: createDB() })
+    const bob2Client = MatrixClient({ ...bob2Creds, db: createDB() })
+
+    const projectId2 = `project2-${suffix}`
+    const layerId2 = `layer2-${suffix}`
+
+    // Alice: create project, layer, post content, invite Bob
+    const alice2ProjectList = await alice2Client.projectList(alice2Creds)
+    const shared = await alice2ProjectList.share(projectId2, 'Sync-Gate Test', 'E2E')
+
+    const alice2Project = await alice2Client.project(alice2Creds)
+    await alice2Project.hydrate({ id: projectId2, upstreamId: shared.upstreamId })
+    await alice2Project.shareLayer(layerId2, 'Test Layer', '')
+    await alice2Project.post(layerId2, testOps)
+    await waitForQueueDrain(alice2Project)
+
+    await alice2ProjectList.invite(projectId2, bob2Creds.user_id)
+
+    // Bob: receive invitation
+    const bob2ProjectList = await bob2Client.projectList(bob2Creds)
+
+    const invitation = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('No invite received')), 15000)
+      bob2ProjectList.start(null, {
+        error: async (err) => { clearTimeout(timer); reject(err) },
+        invited: async (project) => {
+          clearTimeout(timer)
+          await bob2ProjectList.stop()
+          resolve(project)
+        }
+      })
+    })
+
+    // Bob: join project, hydrate
+    await bob2ProjectList.join(invitation.id)
+    const bob2Project = await bob2Client.project(bob2Creds)
+    const structure = await bob2Project.hydrate({
+      id: invitation.id,
+      upstreamId: bob2ProjectList.wellKnown.get(invitation.id)
+    })
+    assert.ok(structure.invitations.length > 0)
+
+    // Bob: start project stream FIRST, then join layer
+    // joinLayer() should restart the sync so the room appears immediately
+    const receivedOps = []
+    let receivedResolve
+    const receivedPromise = new Promise(resolve => { receivedResolve = resolve })
+    const receivedTimeout = setTimeout(() => receivedResolve(), 15000)
+
+    bob2Project.start(undefined, {
+      received: async ({ id, operations }) => {
+        receivedOps.push(...operations)
+        if (receivedOps.length >= testOps.length) {
+          clearTimeout(receivedTimeout)
+          receivedResolve()
+        }
+      },
+      error: async (err) => console.error('Stream error:', err)
+    })
+
+    // Give stream a moment to start its first long-poll
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    // Bob joins the layer — this should restart the sync
+    const inv = structure.invitations[0]
+    await bob2Project.joinLayer(inv.id)
+
+    // Wait for content via received()
+    await receivedPromise
+    await bob2Project.stop()
+    await alice2Project.commandAPI.stop()
+
+    console.log(`  Sync-gated received() delivered ${receivedOps.length} operations`)
+
+    assert.equal(receivedOps.length, testOps.length,
+      `Expected ${testOps.length} operations via received(), got ${receivedOps.length}`)
+
+    for (let i = 0; i < testOps.length; i++) {
+      assert.deepStrictEqual(receivedOps[i], testOps[i],
+        `Operation at index ${i} out of order`)
+    }
+  })
 })

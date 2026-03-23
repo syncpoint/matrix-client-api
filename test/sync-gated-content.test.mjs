@@ -50,6 +50,8 @@ const createTimelineAPI = ({ syncChunks = [], contentResult = { events: [] }, cr
       }
     },
 
+    restartSync: () => Promise.resolve(),
+
     // For assertions
     _contentCallCount: 0,
     _lastContentFilter: null,
@@ -203,7 +205,7 @@ describe('Sync-Gated Content after Join', function () {
       project.idMapping.remember(layerId, roomId)
 
       // Simulate: room was just joined
-      project.pendingContent.add(roomId)
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       // Run start with a handler that captures received operations
       await project.start('batch_1', {
@@ -247,11 +249,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.add(roomId)
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {}
@@ -282,11 +285,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.add(roomId)
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {},
@@ -295,7 +299,9 @@ describe('Sync-Gated Content after Join', function () {
 
       assert.strictEqual(timelineAPI._contentCallCount, 1, 'content() should still be called')
       assert.strictEqual(receivedCalls.length, 0, 'received() should not be called for empty content')
-      assert.ok(!project.pendingContent.has(roomId), 'Room should be removed from pendingContent')
+      // With retry logic, room stays pending after first empty response
+      assert.ok(project.pendingContent.has(roomId), 'Room should stay in pendingContent for retry')
+      assert.strictEqual(project.pendingContent.get(roomId).retries, 1, 'Retry counter should be incremented')
     })
 
     it('should use content filter without not_senders', async () => {
@@ -315,11 +321,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.add(roomId)
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {}
@@ -371,13 +378,14 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', room1)
       project.idMapping.remember('layer-2', room2)
-      project.pendingContent.add(room1)
-      project.pendingContent.add(room2)
+      project.pendingContent.set(room1, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
+      project.pendingContent.set(room2, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {},
@@ -392,6 +400,95 @@ describe('Sync-Gated Content after Join', function () {
       assert.strictEqual(receivedOps[1].id, 'layer-2')
       assert.ok(!project.pendingContent.has(room1))
       assert.ok(!project.pendingContent.has(room2))
+    })
+
+    it('should retry content fetch on empty response (federation backfill)', async () => {
+      const roomId = '!federated:remote'
+      const prevBatchToken = 't123_prev_batch'
+      const ops = [{ type: 'put', key: 'f:1', value: {} }]
+      const receivedOps = []
+      const contentFromTokens = []
+
+      let contentCallIndex = 0
+      // First two calls return empty (backfill not ready), third returns data
+      const contentResults = [
+        { events: [] },
+        { events: [] },
+        { events: [{ type: ODINv2_MESSAGE_TYPE, content: { content: Base64.encodeURI(JSON.stringify(ops)) } }] }
+      ]
+
+      const timelineAPI = createTimelineAPI({
+        syncChunks: [
+          // First sync: room appears with prev_batch token (federation backfill scenario)
+          { next_batch: 'b2', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {}, prevBatches: { [roomId]: prevBatchToken } },
+          { next_batch: 'b3', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {} },
+          { next_batch: 'b4', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {} }
+        ]
+      })
+
+      timelineAPI.content = async (rid, filter, from) => {
+        timelineAPI._contentCallCount++
+        contentFromTokens.push(from)
+        return contentResults[contentCallIndex++]
+      }
+
+      const project = new Project({
+        structureAPI: createStructureAPI(),
+        timelineAPI,
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
+      })
+
+      project.idMapping.remember('layer-1', roomId)
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
+
+      await project.start('b1', {
+        streamToken: async () => {},
+        received: async ({ id, operations }) => { receivedOps.push({ id, operations }) }
+      })
+
+      assert.strictEqual(timelineAPI._contentCallCount, 3, 'content() should be called three times')
+      assert.strictEqual(receivedOps.length, 1, 'received() should be called once with data')
+      assert.deepStrictEqual(receivedOps[0].operations, ops)
+      assert.ok(!project.pendingContent.has(roomId), 'Room should be removed after successful fetch')
+      // All three calls should use the prev_batch token for backward pagination
+      assert.deepStrictEqual(contentFromTokens, [prevBatchToken, prevBatchToken, prevBatchToken],
+        'content() should be called with prev_batch token')
+    })
+
+    it('should give up after MAX_CONTENT_RETRIES empty responses', async () => {
+      const roomId = '!hopeless:remote'
+
+      // Generate 11 sync chunks all containing the room
+      const syncChunks = Array.from({ length: 21 }, (_, i) => ({
+        next_batch: `b${i + 2}`,
+        events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] },
+        stateEvents: {}
+      }))
+
+      const timelineAPI = createTimelineAPI({ syncChunks })
+      timelineAPI.content = async () => {
+        timelineAPI._contentCallCount++
+        return { events: [] }  // Always empty
+      }
+
+      const project = new Project({
+        structureAPI: createStructureAPI(),
+        timelineAPI,
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
+      })
+
+      project.idMapping.remember('layer-1', roomId)
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
+
+      await project.start('b1', {
+        streamToken: async () => {},
+        received: async () => { assert.fail('received() should not be called') }
+      })
+
+      assert.strictEqual(timelineAPI._contentCallCount, 20, 'Should stop after 20 retries')
+      assert.ok(!project.pendingContent.has(roomId), 'Room should be removed after giving up')
     })
   })
 })

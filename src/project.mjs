@@ -20,7 +20,10 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {} }) {
+const CONTENT_RETRY_INTERVAL_MS = 10000
+
+const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {}, contentRetryIntervalMs } = {}) {
+  this.contentRetryIntervalMs = contentRetryIntervalMs ?? CONTENT_RETRY_INTERVAL_MS
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
@@ -38,7 +41,9 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, 
 
   // Rooms waiting for their first sync cycle before content is fetched.
   // joinLayer() adds entries, start() processes them when the room appears in sync.
-  this.pendingContent = new Set()
+  // Maps roomId → { retries: number, prevBatch: string|null } to track
+  // federation backfill retries and the pagination token.
+  this.pendingContent = new Map()
 }
 
 /**
@@ -140,18 +145,29 @@ Project.prototype.joinLayer = async function (layerId) {
 
   const upstreamId = this.idMapping.get(layerId) || (Base64.isValid(layerId) ? Base64.decode(layerId) : layerId)
 
+  // 1. Add the upstream (Matrix) room ID to the filter BEFORE joining
+  //    so the next sync poll includes it.
+  this.idMapping.remember(upstreamId, upstreamId)
+  this.pendingContent.set(upstreamId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
+
+  // 2. Restart the sync long-poll and WAIT until the new iteration has
+  //    applied the updated rooms filter. This ensures the sync request
+  //    that includes the new room is already in flight before we join.
+  await this.timelineAPI.restartSync()
+
+  // 3. NOW perform the actual join — the sync poll already includes this room.
   await this.structureAPI.join(upstreamId)
   const room = await this.structureAPI.getLayer(upstreamId)
+
+  // 4. Replace the temporary self-mapping with the real ODIN↔Matrix mapping.
+  //    room.room_id === upstreamId, so pendingContent stays valid.
+  this.idMapping.forget(upstreamId)
   this.idMapping.remember(room.id, room.room_id)
 
   // Register encryption if applicable (needed before content can be decrypted)
   if (this.crypto.isEnabled && room.encryption) {
     await this.crypto.registerRoom(room.room_id)
   }
-
-  // Mark for sync-gated content fetch: content will be loaded once the room
-  // appears in a sync response, not immediately after join.
-  this.pendingContent.add(room.room_id)
 
   const layer = {...room}
   layer.role = {
@@ -218,7 +234,7 @@ Project.prototype.setDefaultRole = async function (layerId, role) {
 
 Project.prototype.roles = Object.fromEntries(Object.keys(power.ROLES.LAYER).map(k =>[k, k]))
 
-Project.prototype.content = async function (layerId) {
+Project.prototype.content = async function (layerId, from) {
   const filter = {
       lazy_load_members: true, // improve performance
       limit: 1000,
@@ -228,7 +244,7 @@ Project.prototype.content = async function (layerId) {
     }
 
   const upstreamId = this.idMapping.get(layerId)
-  const content = await this.timelineAPI.content(upstreamId, filter)
+  const content = await this.timelineAPI.content(upstreamId, filter, from)
   const operations = content.events
     .map(event =>
       JSON.parse(Base64.decode(event.content.content))
@@ -335,20 +351,50 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     // Check both timeline events and state events — the room may appear in sync
     // with only state (e.g. the join event) but no timeline events if the
     // server-side filter excludes the current user's events via not_senders.
-    for (const roomId of this.pendingContent) {
-      if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
+    //
+    // Federation backfill retry: when /messages returns empty (the remote
+    // server hasn't backfilled yet), keep the room pending and retry on
+    // subsequent sync cycles up to MAX_CONTENT_RETRIES times.
+    const MAX_CONTENT_RETRIES = 20
+    for (const [roomId, state] of this.pendingContent) {
 
-      this.pendingContent.delete(roomId)
+      // On the first attempt, wait for the room to appear in sync.
+      // On retries, proceed on every sync cycle (the room won't appear
+      // again — no new events — but we need to retry for key delivery).
+      if (!state.seenInSync) {
+        if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
+        state.seenInSync = true
+      } else {
+        // Throttle retries: skip if less than contentRetryIntervalMs since last attempt
+        if (state.lastAttempt && (Date.now() - state.lastAttempt) < this.contentRetryIntervalMs) continue
+      }
+
+      // Capture the prev_batch token from this sync response if available.
+      // On federation joins the first sync may have limited:true with a
+      // prev_batch that is the correct starting point for backward pagination.
+      if (chunk.prevBatches?.[roomId]) {
+        state.prevBatch = chunk.prevBatches[roomId]
+      }
+
       const log = getLogger()
-      log.info(`Sync-gated content fetch for room ${roomId}`)
+      log.info(`Sync-gated content fetch for room ${roomId} (attempt ${state.retries + 1}, prevBatch: ${state.prevBatch || 'none'})`)
 
+      state.lastAttempt = Date.now()
       const layerId = this.idMapping.get(roomId)
-      const operations = await this.content(layerId)
-
-      log.info(`Sync-gated content: ${operations.length} operations for room ${roomId}`)
+      const operations = await this.content(layerId, state.prevBatch)
 
       if (operations.length > 0) {
+        this.pendingContent.delete(roomId)
+        log.info(`Sync-gated content: ${operations.length} operations for room ${roomId}`)
         await streamHandler.received({ id: layerId, operations })
+      } else {
+        state.retries++
+        if (state.retries >= MAX_CONTENT_RETRIES) {
+          this.pendingContent.delete(roomId)
+          log.warn(`Sync-gated content: giving up on room ${roomId} after ${MAX_CONTENT_RETRIES} retries (empty content)`)
+        } else {
+          log.info(`Sync-gated content: empty response for room ${roomId}, will retry (${state.retries}/${MAX_CONTENT_RETRIES})`)
+        }
       }
     }
 

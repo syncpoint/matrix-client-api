@@ -64,7 +64,7 @@ TimelineAPI.prototype.credentials = function () {
   return this.httpApi.credentials
 }
 
-TimelineAPI.prototype.content = async function (roomId, filter, _from) {
+TimelineAPI.prototype.content = async function (roomId, filter, from) {
   getLogger().debug('Timeline content filter:', JSON.stringify(filter))
 
   // Augment the filter for crypto: add m.room.encrypted to types
@@ -75,7 +75,12 @@ TimelineAPI.prototype.content = async function (roomId, filter, _from) {
     originalTypes = filter.types
   }
 
-  const result = await this.catchUp(roomId, null, null, 'f', effectiveFilter)
+  // When a pagination token is provided (e.g. prev_batch from sync), paginate
+  // backwards from that point. This is essential for federation scenarios where
+  // forward pagination from the start returns empty results because the remote
+  // server hasn't backfilled yet, but backward pagination from prev_batch works.
+  const dir = from ? 'b' : 'f'
+  const result = await this.catchUp(roomId, null, from || null, dir, effectiveFilter)
 
   // Decrypt + post-filter
   if (this.decryptEvent && result.events) {
@@ -97,7 +102,7 @@ TimelineAPI.prototype.content = async function (roomId, filter, _from) {
 }
 
 
-TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) {
+TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, signal) {
   /*
     We want the complete timeline for all rooms that we have already joined. Thus we get the most recent
     events and then iterate over partial results until we filled the gap. The order of the events shall be
@@ -117,7 +122,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   // for catching up
   const jobs = {}
 
-  const syncResult = await this.httpApi.sync(since, effectiveFilter, timeout)
+  const syncResult = await this.httpApi.sync(since, effectiveFilter, timeout, signal)
 
   // Feed crypto state from sync response
   if (this.onSyncResponse) {
@@ -130,6 +135,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
   }
 
   const stateEvents = {}
+  const prevBatches = {}
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
     // Collect state events (membership changes, power levels, etc.)
@@ -140,6 +146,14 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     const timelineState = (content.timeline?.events || []).filter(e => 'state_key' in e)
     if (timelineState.length) {
       stateEvents[roomId] = [...(stateEvents[roomId] || []), ...timelineState]
+    }
+
+    // Preserve prev_batch for all rooms with limited timeline (even if events are empty).
+    // This is needed for federation backfill: the room may appear in sync with
+    // limited:true but empty events — the prev_batch is still the correct
+    // pagination token to fetch historical content.
+    if (content.timeline?.limited && content.timeline?.prev_batch) {
+      prevBatches[roomId] = content.timeline.prev_batch
     }
 
     if (!content.timeline?.events?.length) continue
@@ -195,7 +209,8 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0) 
     since,
     next_batch: syncResult.next_batch,
     events,
-    stateEvents
+    stateEvents,
+    prevBatches
   }
 }
 
@@ -263,26 +278,68 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
 }
 
 
+/**
+ * Abort the current long-poll sync request so that the stream restarts
+ * immediately with an updated filter (e.g. after joinLayer added a room
+ * to idMapping). The stream loop catches the abort and re-enters the
+ * next iteration without incrementing the retry counter.
+ */
+TimelineAPI.prototype.restartSync = function () {
+  const promise = new Promise(resolve => {
+    this._onSyncRestarted = resolve
+  })
+
+  if (this._syncAbort) {
+    this._syncAbort.abort()
+    this._syncAbort = null
+  }
+
+  return promise
+}
+
 TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = (new AbortController()).signal) {
-
-
 
   let streamToken = since
   let retryCounter = 0
 
   while (!signal.aborted) {
+    // Each iteration gets its own AbortController so that restartSync()
+    // can cancel the current long-poll without stopping the stream.
+    const iterationAbort = new AbortController()
+    this._syncAbort = iterationAbort
+
+    // Forward the outer lifecycle signal: if the stream is stopped,
+    // also abort the current request.
+    const onOuterAbort = () => iterationAbort.abort()
+    signal.addEventListener('abort', onOuterAbort, { once: true })
+
     try {
       await chill(retryCounter)
       const filter = filterProvider ? filterProvider() : undefined
-      const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, signal)
+
+      // Signal that the restarted iteration has applied the updated filter.
+      if (this._onSyncRestarted) {
+        this._onSyncRestarted()
+        this._onSyncRestarted = null
+      }
+
+      const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, iterationAbort.signal)
       retryCounter = 0
       if (streamToken !== syncResult.next_batch) {
         streamToken = syncResult.next_batch
         yield syncResult
       }
     } catch (error) {
+      if (iterationAbort.signal.aborted && !signal.aborted) {
+        // restartSync() was called — not an error, just restart immediately
+        getLogger().debug('Sync restarted (filter update)')
+        continue
+      }
       retryCounter++
       yield new Error(error)
+    } finally {
+      signal.removeEventListener('abort', onOuterAbort)
+      this._syncAbort = null
     }
   }
 }
