@@ -20,7 +20,10 @@ const MAX_MESSAGE_SIZE = 56 * 1024
  * @param {Object} apis
  * @property {StructureAPI} structureAPI
  */
-const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {} }) {
+const CONTENT_RETRY_INTERVAL_MS = 5000
+
+const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, crypto = {}, contentRetryIntervalMs } = {}) {
+  this.contentRetryIntervalMs = contentRetryIntervalMs ?? CONTENT_RETRY_INTERVAL_MS
   this.structureAPI = structureAPI
   this.timelineAPI = timelineAPI
   this.commandAPI = commandAPI
@@ -145,7 +148,7 @@ Project.prototype.joinLayer = async function (layerId) {
   // 1. Add the upstream (Matrix) room ID to the filter BEFORE joining
   //    so the next sync poll includes it.
   this.idMapping.remember(upstreamId, upstreamId)
-  this.pendingContent.set(upstreamId, { retries: 0, prevBatch: null })
+  this.pendingContent.set(upstreamId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
   // 2. Restart the sync long-poll and WAIT until the new iteration has
   //    applied the updated rooms filter. This ensures the sync request
@@ -354,7 +357,17 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     // subsequent sync cycles up to MAX_CONTENT_RETRIES times.
     const MAX_CONTENT_RETRIES = 10
     for (const [roomId, state] of this.pendingContent) {
-      if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
+
+      // On the first attempt, wait for the room to appear in sync.
+      // On retries, proceed on every sync cycle (the room won't appear
+      // again — no new events — but we need to retry for key delivery).
+      if (!state.seenInSync) {
+        if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
+        state.seenInSync = true
+      } else {
+        // Throttle retries: skip if less than contentRetryIntervalMs since last attempt
+        if (state.lastAttempt && (Date.now() - state.lastAttempt) < this.contentRetryIntervalMs) continue
+      }
 
       // Capture the prev_batch token from this sync response if available.
       // On federation joins the first sync may have limited:true with a
@@ -366,6 +379,7 @@ Project.prototype.start = async function (streamToken, handler = {}) {
       const log = getLogger()
       log.info(`Sync-gated content fetch for room ${roomId} (attempt ${state.retries + 1}, prevBatch: ${state.prevBatch || 'none'})`)
 
+      state.lastAttempt = Date.now()
       const layerId = this.idMapping.get(roomId)
       const operations = await this.content(layerId, state.prevBatch)
 

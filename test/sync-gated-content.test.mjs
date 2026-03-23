@@ -205,7 +205,7 @@ describe('Sync-Gated Content after Join', function () {
       project.idMapping.remember(layerId, roomId)
 
       // Simulate: room was just joined
-      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       // Run start with a handler that captures received operations
       await project.start('batch_1', {
@@ -249,11 +249,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {}
@@ -284,11 +285,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {},
@@ -319,11 +321,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {}
@@ -375,13 +378,14 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', room1)
       project.idMapping.remember('layer-2', room2)
-      project.pendingContent.set(room1, { retries: 0, prevBatch: null })
-      project.pendingContent.set(room2, { retries: 0, prevBatch: null })
+      project.pendingContent.set(room1, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
+      project.pendingContent.set(room2, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('batch_1', {
         streamToken: async () => {},
@@ -431,11 +435,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('b1', {
         streamToken: async () => {},
@@ -470,11 +475,12 @@ describe('Sync-Gated Content after Join', function () {
       const project = new Project({
         structureAPI: createStructureAPI(),
         timelineAPI,
-        commandAPI: createCommandAPI()
+        commandAPI: createCommandAPI(),
+        contentRetryIntervalMs: 0
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null, seenInSync: false, lastAttempt: null })
 
       await project.start('b1', {
         streamToken: async () => {},
