@@ -270,10 +270,16 @@ TimelineAPI.prototype.catchUp = async function (roomId, lastKnownStreamToken, cu
  * next iteration without incrementing the retry counter.
  */
 TimelineAPI.prototype.restartSync = function () {
+  const promise = new Promise(resolve => {
+    this._onSyncRestarted = resolve
+  })
+
   if (this._syncAbort) {
     this._syncAbort.abort()
     this._syncAbort = null
   }
+
+  return promise
 }
 
 TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = (new AbortController()).signal) {
@@ -295,6 +301,13 @@ TimelineAPI.prototype.stream = async function* (since, filterProvider, signal = 
     try {
       await chill(retryCounter)
       const filter = filterProvider ? filterProvider() : undefined
+
+      // Signal that the restarted iteration has applied the updated filter.
+      if (this._onSyncRestarted) {
+        this._onSyncRestarted()
+        this._onSyncRestarted = null
+      }
+
       const syncResult = await this.syncTimeline(streamToken, filter, DEFAULT_POLL_TIMEOUT, iterationAbort.signal)
       retryCounter = 0
       if (streamToken !== syncResult.next_batch) {

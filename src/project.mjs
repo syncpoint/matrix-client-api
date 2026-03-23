@@ -145,10 +145,10 @@ Project.prototype.joinLayer = async function (layerId) {
   this.idMapping.remember(upstreamId, upstreamId)
   this.pendingContent.add(upstreamId)
 
-  // 2. Restart the sync long-poll so it picks up the updated rooms filter
-  //    immediately. The restarted poll will be waiting when the join event
-  //    arrives on the server.
-  this.timelineAPI.restartSync()
+  // 2. Restart the sync long-poll and WAIT until the new iteration has
+  //    applied the updated rooms filter. This ensures the sync request
+  //    that includes the new room is already in flight before we join.
+  await this.timelineAPI.restartSync()
 
   // 3. NOW perform the actual join — the sync poll already includes this room.
   await this.structureAPI.join(upstreamId)
