@@ -38,7 +38,8 @@ const Project = function ({ structureAPI, timelineAPI, commandAPI, memberCache, 
 
   // Rooms waiting for their first sync cycle before content is fetched.
   // joinLayer() adds entries, start() processes them when the room appears in sync.
-  // Maps roomId → { retries: number } to track federation backfill retries.
+  // Maps roomId → { retries: number, prevBatch: string|null } to track
+  // federation backfill retries and the pagination token.
   this.pendingContent = new Map()
 }
 
@@ -144,7 +145,7 @@ Project.prototype.joinLayer = async function (layerId) {
   // 1. Add the upstream (Matrix) room ID to the filter BEFORE joining
   //    so the next sync poll includes it.
   this.idMapping.remember(upstreamId, upstreamId)
-  this.pendingContent.set(upstreamId, { retries: 0 })
+  this.pendingContent.set(upstreamId, { retries: 0, prevBatch: null })
 
   // 2. Restart the sync long-poll and WAIT until the new iteration has
   //    applied the updated rooms filter. This ensures the sync request
@@ -230,7 +231,7 @@ Project.prototype.setDefaultRole = async function (layerId, role) {
 
 Project.prototype.roles = Object.fromEntries(Object.keys(power.ROLES.LAYER).map(k =>[k, k]))
 
-Project.prototype.content = async function (layerId) {
+Project.prototype.content = async function (layerId, from) {
   const filter = {
       lazy_load_members: true, // improve performance
       limit: 1000,
@@ -240,7 +241,7 @@ Project.prototype.content = async function (layerId) {
     }
 
   const upstreamId = this.idMapping.get(layerId)
-  const content = await this.timelineAPI.content(upstreamId, filter)
+  const content = await this.timelineAPI.content(upstreamId, filter, from)
   const operations = content.events
     .map(event =>
       JSON.parse(Base64.decode(event.content.content))
@@ -355,11 +356,18 @@ Project.prototype.start = async function (streamToken, handler = {}) {
     for (const [roomId, state] of this.pendingContent) {
       if (!chunk.events[roomId] && !chunk.stateEvents?.[roomId]) continue
 
+      // Capture the prev_batch token from this sync response if available.
+      // On federation joins the first sync may have limited:true with a
+      // prev_batch that is the correct starting point for backward pagination.
+      if (chunk.prevBatches?.[roomId]) {
+        state.prevBatch = chunk.prevBatches[roomId]
+      }
+
       const log = getLogger()
-      log.info(`Sync-gated content fetch for room ${roomId} (attempt ${state.retries + 1})`)
+      log.info(`Sync-gated content fetch for room ${roomId} (attempt ${state.retries + 1}, prevBatch: ${state.prevBatch || 'none'})`)
 
       const layerId = this.idMapping.get(roomId)
-      const operations = await this.content(layerId)
+      const operations = await this.content(layerId, state.prevBatch)
 
       if (operations.length > 0) {
         this.pendingContent.delete(roomId)

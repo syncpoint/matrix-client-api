@@ -64,7 +64,7 @@ TimelineAPI.prototype.credentials = function () {
   return this.httpApi.credentials
 }
 
-TimelineAPI.prototype.content = async function (roomId, filter, _from) {
+TimelineAPI.prototype.content = async function (roomId, filter, from) {
   getLogger().debug('Timeline content filter:', JSON.stringify(filter))
 
   // Augment the filter for crypto: add m.room.encrypted to types
@@ -75,7 +75,12 @@ TimelineAPI.prototype.content = async function (roomId, filter, _from) {
     originalTypes = filter.types
   }
 
-  const result = await this.catchUp(roomId, null, null, 'f', effectiveFilter)
+  // When a pagination token is provided (e.g. prev_batch from sync), paginate
+  // backwards from that point. This is essential for federation scenarios where
+  // forward pagination from the start returns empty results because the remote
+  // server hasn't backfilled yet, but backward pagination from prev_batch works.
+  const dir = from ? 'b' : 'f'
+  const result = await this.catchUp(roomId, null, from || null, dir, effectiveFilter)
 
   // Decrypt + post-filter
   if (this.decryptEvent && result.events) {
@@ -130,6 +135,7 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
   }
 
   const stateEvents = {}
+  const prevBatches = {}
 
   for (const [roomId, content] of Object.entries(syncResult.rooms?.join || {})) {
     // Collect state events (membership changes, power levels, etc.)
@@ -140,6 +146,14 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
     const timelineState = (content.timeline?.events || []).filter(e => 'state_key' in e)
     if (timelineState.length) {
       stateEvents[roomId] = [...(stateEvents[roomId] || []), ...timelineState]
+    }
+
+    // Preserve prev_batch for all rooms with limited timeline (even if events are empty).
+    // This is needed for federation backfill: the room may appear in sync with
+    // limited:true but empty events — the prev_batch is still the correct
+    // pagination token to fetch historical content.
+    if (content.timeline?.limited && content.timeline?.prev_batch) {
+      prevBatches[roomId] = content.timeline.prev_batch
     }
 
     if (!content.timeline?.events?.length) continue
@@ -195,7 +209,8 @@ TimelineAPI.prototype.syncTimeline = async function(since, filter, timeout = 0, 
     since,
     next_batch: syncResult.next_batch,
     events,
-    stateEvents
+    stateEvents,
+    prevBatches
   }
 }
 

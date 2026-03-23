@@ -205,7 +205,7 @@ describe('Sync-Gated Content after Join', function () {
       project.idMapping.remember(layerId, roomId)
 
       // Simulate: room was just joined
-      project.pendingContent.set(roomId, { retries: 0 })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
 
       // Run start with a handler that captures received operations
       await project.start('batch_1', {
@@ -253,7 +253,7 @@ describe('Sync-Gated Content after Join', function () {
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0 })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
 
       await project.start('batch_1', {
         streamToken: async () => {}
@@ -288,7 +288,7 @@ describe('Sync-Gated Content after Join', function () {
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0 })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
 
       await project.start('batch_1', {
         streamToken: async () => {},
@@ -323,7 +323,7 @@ describe('Sync-Gated Content after Join', function () {
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0 })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
 
       await project.start('batch_1', {
         streamToken: async () => {}
@@ -380,8 +380,8 @@ describe('Sync-Gated Content after Join', function () {
 
       project.idMapping.remember('layer-1', room1)
       project.idMapping.remember('layer-2', room2)
-      project.pendingContent.set(room1, { retries: 0 })
-      project.pendingContent.set(room2, { retries: 0 })
+      project.pendingContent.set(room1, { retries: 0, prevBatch: null })
+      project.pendingContent.set(room2, { retries: 0, prevBatch: null })
 
       await project.start('batch_1', {
         streamToken: async () => {},
@@ -400,8 +400,10 @@ describe('Sync-Gated Content after Join', function () {
 
     it('should retry content fetch on empty response (federation backfill)', async () => {
       const roomId = '!federated:remote'
+      const prevBatchToken = 't123_prev_batch'
       const ops = [{ type: 'put', key: 'f:1', value: {} }]
       const receivedOps = []
+      const contentFromTokens = []
 
       let contentCallIndex = 0
       // First two calls return empty (backfill not ready), third returns data
@@ -413,15 +415,16 @@ describe('Sync-Gated Content after Join', function () {
 
       const timelineAPI = createTimelineAPI({
         syncChunks: [
-          // Three sync cycles, each containing the room
-          { next_batch: 'b2', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {} },
+          // First sync: room appears with prev_batch token (federation backfill scenario)
+          { next_batch: 'b2', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {}, prevBatches: { [roomId]: prevBatchToken } },
           { next_batch: 'b3', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {} },
           { next_batch: 'b4', events: { [roomId]: [{ type: 'm.room.member', state_key: '@a:test', content: { membership: 'join' } }] }, stateEvents: {} }
         ]
       })
 
-      timelineAPI.content = async () => {
+      timelineAPI.content = async (rid, filter, from) => {
         timelineAPI._contentCallCount++
+        contentFromTokens.push(from)
         return contentResults[contentCallIndex++]
       }
 
@@ -432,7 +435,7 @@ describe('Sync-Gated Content after Join', function () {
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0 })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
 
       await project.start('b1', {
         streamToken: async () => {},
@@ -443,6 +446,9 @@ describe('Sync-Gated Content after Join', function () {
       assert.strictEqual(receivedOps.length, 1, 'received() should be called once with data')
       assert.deepStrictEqual(receivedOps[0].operations, ops)
       assert.ok(!project.pendingContent.has(roomId), 'Room should be removed after successful fetch')
+      // All three calls should use the prev_batch token for backward pagination
+      assert.deepStrictEqual(contentFromTokens, [prevBatchToken, prevBatchToken, prevBatchToken],
+        'content() should be called with prev_batch token')
     })
 
     it('should give up after MAX_CONTENT_RETRIES empty responses', async () => {
@@ -468,7 +474,7 @@ describe('Sync-Gated Content after Join', function () {
       })
 
       project.idMapping.remember('layer-1', roomId)
-      project.pendingContent.set(roomId, { retries: 0 })
+      project.pendingContent.set(roomId, { retries: 0, prevBatch: null })
 
       await project.start('b1', {
         streamToken: async () => {},
