@@ -189,11 +189,11 @@ Project.prototype.joinLayer = async function (layerId) {
  *
  * @param {string} layerId - the local layer id
  */
-Project.prototype.shareHistoricalKeys = function (layerId) {
+Project.prototype.shareHistoricalKeys = async function (layerId) {
   if (!this.crypto.isEnabled) return
   const roomId = this.idMapping.get(layerId)
   if (!roomId) return
-  this.commandAPI.schedule([async () => {
+  await this.commandAPI.schedule([async () => {
     const myUserId = this.timelineAPI.credentials().user_id
     const projectRoomId = this.idMapping.get(this.projectId)
     const allMembers = await this.memberCache.getMembers(projectRoomId)
@@ -254,7 +254,7 @@ Project.prototype.content = async function (layerId, from) {
 }
 
 Project.prototype.post = async function (layerId, operations) {
-  this.__post(layerId, operations, ODINv2_MESSAGE_TYPE)
+  await this.__post(layerId, operations, ODINv2_MESSAGE_TYPE)
 }
 
 Project.prototype.__post = async function (layerId, operations, messageType) {
@@ -279,7 +279,9 @@ Project.prototype.__post = async function (layerId, operations, messageType) {
   const parts = collect(chunks)
 
   const upstreamId = this.idMapping.get(layerId)
-  parts.forEach(part => this.commandAPI.schedule(['sendMessageEvent', upstreamId, messageType, { content: encode(part) }]))
+  for (const part of parts) {
+    await this.commandAPI.schedule(['sendMessageEvent', upstreamId, messageType, { content: encode(part) }])
+  }
 }
 
 Project.prototype.start = async function (streamToken, handler = {}) {
