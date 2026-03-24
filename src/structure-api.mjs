@@ -205,6 +205,20 @@ class StructureAPI {
                         }))
 
 
+    // Federation timing: the space room may not yet appear in the sync
+    // response right after joining. Fall back to hierarchy data which
+    // is always available.
+    if (!space) {
+      const hierarchySpace = hierarchy.rooms.find(room => room.room_id === globalId)
+      space = {
+        name: hierarchySpace?.name,
+        room_id: globalId,
+        topic: hierarchySpace?.topic,
+        powerlevel: undefined,
+        encryption: null
+      }
+    }
+
     const project = {
       name: space.name,
       powerlevel: space.powerlevel,
