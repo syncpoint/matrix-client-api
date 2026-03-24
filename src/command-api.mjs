@@ -23,16 +23,16 @@ class CommandAPI {
    *
    * There is no way to retrieve the returning result of that function.
    */
-  schedule (functionCall) {
+  async schedule (functionCall) {
     const [functionName] = functionCall
     // Allow scheduling async callback functions directly
     if (typeof functionName === 'function') {
-      this.scheduledCalls.enqueue(functionCall)
+      await this.scheduledCalls.enqueue(functionCall)
       return
     }
     if (!this.httpAPI[functionName]) throw new Error(`HttpAPI: property ${functionName} does not exist`)
     if (typeof this.httpAPI[functionName] !== 'function') throw new Error(`HttpAPI: ${functionName} is not a function`)
-    this.scheduledCalls.enqueue(functionCall)
+    await this.scheduledCalls.enqueue(functionCall)
   }
 
 
