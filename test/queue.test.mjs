@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it, beforeEach } from 'mocha'
-import memdown from 'memdown'
-import levelup from 'levelup'
-import subleveldown from 'subleveldown'
+import { MemoryLevel } from 'memory-level'
 import { FIFO } from '../src/queue.mjs'
 
 const createDB = () => {
-  const db = levelup(memdown())
-  return subleveldown(db, 'command-queue', { valueEncoding: 'json' })
+  return new MemoryLevel({ valueEncoding: 'json' })
 }
 
 describe('Persistent FIFO Queue', function () {

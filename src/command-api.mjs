@@ -7,7 +7,7 @@ class CommandAPI {
    * @param {import('./room-members.mjs').RoomMemberCache} memberCache
    * @param {Object} [options={}]
    * @param {Function} [options.encryptEvent] - async (roomId, eventType, content, memberIds) => encryptedContent
-   * @param {Object} [options.db] - A levelup-compatible database instance for persistent queue storage
+   * @param {Object} [options.db] - An abstract-level database instance for persistent queue storage
    */
   constructor (httpAPI, memberCache, options = {}) {
     this.httpAPI = httpAPI

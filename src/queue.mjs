@@ -19,7 +19,7 @@ const formatKey = n => `${KEY_PREFIX}${String(n).padStart(PAD_LENGTH, '0')}`
 const parseKey = key => Number(key.slice(KEY_PREFIX.length))
 
 /**
- * A persistent FIFO queue backed by a LevelDB instance (levelup/subleveldown API).
+ * A persistent FIFO queue backed by an abstract-level database.
  *
  * Serializable commands (arrays with string function name) are persisted to disk.
  * Non-serializable commands (callbacks) are held in memory only.
@@ -29,7 +29,7 @@ const parseKey = key => Number(key.slice(KEY_PREFIX.length))
  */
 class FIFO {
   /**
-   * @param {Object} db - A levelup-compatible database instance (e.g. subleveldown)
+   * @param {Object} db - An abstract-level database instance (e.g. a sublevel)
    */
   constructor (db) {
     this.db = db
@@ -47,23 +47,16 @@ class FIFO {
     const log = getLogger()
     const entries = []
 
-    await new Promise((resolve, reject) => {
-      const stream = this.db.createReadStream({ gte: `${KEY_PREFIX}0`, lte: `${KEY_PREFIX}\xFF` })
-      stream.on('data', ({ key, value }) => {
-        const k = typeof key === 'string' ? key : key.toString()
-        const seq = parseKey(k)
-        const command = typeof value === 'string' ? JSON.parse(value) : value
-        entries.push({ seq, key: k, command })
-      })
-      stream.on('error', reject)
-      stream.on('end', resolve)
-    })
+    const raw = await this.db.iterator({ gte: `${KEY_PREFIX}0`, lte: `${KEY_PREFIX}\xFF` }).all()
+    for (const [key, value] of raw) {
+      const seq = parseKey(key)
+      entries.push({ seq, key, command: value })
+    }
 
     // Restore the counter (persisted separately to survive acknowledge)
     try {
       const savedCounter = await this.db.get(COUNTER_KEY)
-      const parsed = typeof savedCounter === 'string' ? Number(JSON.parse(savedCounter)) : Number(savedCounter)
-      if (!isNaN(parsed)) this.counter = parsed
+      if (savedCounter != null) this.counter = Number(savedCounter)
     } catch {
       // Key not found — counter stays at 0
     }
@@ -101,12 +94,10 @@ class FIFO {
     if (typeof functionName !== 'function') {
       this.counter++
       key = formatKey(this.counter)
-      await new Promise((resolve, reject) => {
-        this.db.batch([
-          { type: 'put', key, value: JSON.stringify(command) },
-          { type: 'put', key: COUNTER_KEY, value: JSON.stringify(this.counter) }
-        ], err => err ? reject(err) : resolve())
-      })
+      await this.db.batch([
+        { type: 'put', key, value: command },
+        { type: 'put', key: COUNTER_KEY, value: this.counter }
+      ])
     }
 
     if (!this.pendingResolvers.length) this._addPromise()
@@ -131,9 +122,7 @@ class FIFO {
    */
   async acknowledge (key) {
     if (key) {
-      await new Promise((resolve, reject) => {
-        this.db.del(key, err => err ? reject(err) : resolve())
-      })
+      await this.db.del(key)
     }
   }
 
