@@ -1,6 +1,6 @@
 {
   "name": "@syncpoint/matrix-client-api",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "description": "A minimal client API for [matrix]",
   "main": "index.mjs",
   "scripts": {
@@ -23,10 +23,8 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^7.6.0",
-    "levelup": "^5.1.1",
-    "memdown": "^6.1.1",
+    "memory-level": "^3.1.0",
     "mocha": "^10.2.0",
-    "oxlint": "^1.56.0",
-    "subleveldown": "^6.0.1"
+    "oxlint": "^1.56.0"
   }
 }
